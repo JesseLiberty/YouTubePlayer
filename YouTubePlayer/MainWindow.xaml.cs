@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private const string WatchedVideosFile = "watched-videos.json";
     private const string StartedVideosFile = "started-videos.json";
     private const string KnownVideosFile = "known-videos.json";
+    private const string VideoPositionsFile = "video-positions.json";
 
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
     private readonly HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
     private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
+    private readonly Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
@@ -67,6 +69,7 @@ public partial class MainWindow : Window
                         {
                             video.WatchLevel = GetWatchLevel(video.VideoId);
                             video.IsNew = !_knownVideoIds.Contains(video.VideoId);
+                            video.PositionSeconds = _videoPositions.GetValueOrDefault(video.VideoId);
                             column.Videos.Add(video);
                         }
                 }
@@ -189,6 +192,12 @@ public partial class MainWindow : Window
             LocalStore.Save(StartedVideosFile, _startedVideoIds);
         if (player.WatchLevel == WatchLevel.Watched && _watchedVideoIds.Add(video.VideoId))
             LocalStore.Save(WatchedVideosFile, _watchedVideoIds);
+        if (player.PositionSeconds is int positionSeconds)
+        {
+            _videoPositions[video.VideoId] = positionSeconds;
+            LocalStore.Save(VideoPositionsFile, _videoPositions);
+            video.PositionSeconds = positionSeconds;
+        }
         video.WatchLevel = GetWatchLevel(video.VideoId);
         Activate();
     }

@@ -15,6 +15,7 @@ public sealed class VideoItem : INotifyPropertyChanged
 {
     private WatchLevel _watchLevel;
     private bool _isNew;
+    private int _positionSeconds;
 
     public required string VideoId { get; init; }
     public required string Title { get; init; }
@@ -28,8 +29,21 @@ public sealed class VideoItem : INotifyPropertyChanged
         {
             var date = PublishedAt?.ToString("MMM d, yyyy") ?? "";
             if (Duration is not { Ticks: > 0 } d) return date;
-            var length = d.TotalHours >= 1 ? d.ToString(@"h\:mm\:ss") : d.ToString(@"m\:ss");
-            return $"{date}  ·  {length}";
+            var elapsedMinutes = (int)Math.Round(PositionSeconds / 60.0, MidpointRounding.AwayFromZero);
+            var totalMinutes = (int)Math.Round(d.TotalMinutes, MidpointRounding.AwayFromZero);
+            return $"{date}  ·  {elapsedMinutes}:{totalMinutes}";
+        }
+    }
+
+    public int PositionSeconds
+    {
+        get => _positionSeconds;
+        set
+        {
+            if (_positionSeconds == value) return;
+            _positionSeconds = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PositionSeconds)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DateAndLength)));
         }
     }
 

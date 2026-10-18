@@ -10,7 +10,7 @@ public partial class PlayerWindow : Window
     // Persistent profile so a YouTube sign-in (Premium, history) is remembered between videos.
     private static Task<CoreWebView2Environment>? s_environment;
 
-    // Reports "started:<id>" once the main (non-ad) video plays, "watched:<id>" past 90%, and "ended" when it finishes.
+    // Reports playback position and watch progress for the main (non-ad) video.
     private const string EndedScript = """
         (() => {
           if (window.top !== window) return;
@@ -19,12 +19,21 @@ public partial class PlayerWindow : Window
             const player = v.closest('.html5-video-player');
             return !(player && player.classList.contains('ad-showing'));
           };
-          let startedId = null, watchedId = null;
+          let startedId = null, watchedId = null, positionId = null, positionSecond = -1;
           document.addEventListener('timeupdate', e => {
             const v = e.target;
             if (!isMainVideo(v) || !v.duration) return;
             const id = new URLSearchParams(location.search).get('v');
             if (!id) return;
+            if (id !== positionId) {
+              positionId = id;
+              positionSecond = -1;
+            }
+            const currentSecond = Math.floor(v.currentTime);
+            if (currentSecond !== positionSecond) {
+              positionSecond = currentSecond;
+              window.chrome.webview.postMessage('position:' + id + ':' + currentSecond);
+            }
             if (id !== startedId && v.currentTime >= 1) {
               startedId = id;
               window.chrome.webview.postMessage('started:' + id);
@@ -35,7 +44,13 @@ public partial class PlayerWindow : Window
             }
           }, true);
           document.addEventListener('ended', e => {
-            if (isMainVideo(e.target)) window.chrome.webview.postMessage('ended');
+            const v = e.target;
+            if (!isMainVideo(v)) return;
+            const id = new URLSearchParams(location.search).get('v');
+            if (id && Number.isFinite(v.duration)) {
+              window.chrome.webview.postMessage('position:' + id + ':' + Math.floor(v.duration));
+            }
+            window.chrome.webview.postMessage('ended');
           }, true);
         })();
         """;
@@ -43,6 +58,7 @@ public partial class PlayerWindow : Window
     private readonly string _videoId;
 
     public WatchLevel WatchLevel { get; private set; }
+    public int? PositionSeconds { get; private set; }
 
     public PlayerWindow(string videoId, string title)
     {
@@ -68,6 +84,12 @@ public partial class PlayerWindow : Window
                 var message = args.TryGetWebMessageAsString();
                 if (message == "watched:" + _videoId) WatchLevel = WatchLevel.Watched;
                 else if (message == "started:" + _videoId && WatchLevel < WatchLevel.Started) WatchLevel = WatchLevel.Started;
+                else if (message.StartsWith("position:", StringComparison.Ordinal))
+                {
+                  var parts = message.Split(':');
+                  if (parts.Length == 3 && parts[1] == _videoId && int.TryParse(parts[2], out var positionSeconds))
+                    PositionSeconds = positionSeconds;
+                }
                 else if (message == "ended") Close();
             };
             await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
