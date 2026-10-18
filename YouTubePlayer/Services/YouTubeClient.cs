@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net;
+using System.Xml;
 using Google;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Services;
@@ -99,14 +100,19 @@ public sealed class YouTubeClient
         try
         {
             var response = await request.ExecuteAsync(ct);
-            return response.Items
+            var items = response.Items
                 .Where(i => i.ContentDetails?.VideoPublishedAtDateTimeOffset is not null) // skips private/deleted videos
+                .ToList();
+            var durations = await GetDurationsAsync(service, items.Select(i => i.ContentDetails.VideoId), ct);
+
+            return items
                 .Select(i => new VideoItem
                 {
                     VideoId = i.ContentDetails.VideoId,
                     Title = i.Snippet.Title,
                     Description = i.Snippet.Description ?? "",
                     PublishedAt = i.ContentDetails.VideoPublishedAtDateTimeOffset?.LocalDateTime,
+                    Duration = durations.GetValueOrDefault(i.ContentDetails.VideoId),
                 })
                 .OrderByDescending(v => v.PublishedAt)
                 .ToList();
@@ -115,6 +121,28 @@ public sealed class YouTubeClient
         {
             return [];
         }
+    }
+
+    private static async Task<Dictionary<string, TimeSpan>> GetDurationsAsync(
+        YouTubeService service, IEnumerable<string> videoIds, CancellationToken ct)
+    {
+        var result = new Dictionary<string, TimeSpan>();
+        foreach (var chunk in videoIds.Chunk(50))
+        {
+            var request = service.Videos.List("contentDetails");
+            request.Id = new Repeatable<string>(chunk);
+            var response = await request.ExecuteAsync(ct);
+            foreach (var v in response.Items ?? [])
+            {
+                // ISO 8601, e.g. "PT1H2M3S"; live/upcoming videos report "P0D".
+                if (v.ContentDetails?.Duration is { } iso)
+                {
+                    try { result[v.Id] = XmlConvert.ToTimeSpan(iso); }
+                    catch (FormatException) { }
+                }
+            }
+        }
+        return result;
     }
 
     public async Task UnsubscribeAsync(string subscriptionId, CancellationToken ct = default)

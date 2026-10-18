@@ -67,7 +67,7 @@
                                                             ToolTip="Remove from list" Tag="{Binding}" Click="RemoveVideo_Click" />
                                                     <StackPanel>
                                                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" />
-                                                        <TextBlock Text="{Binding PublishedAt, StringFormat={}{0:MMM d, yyyy}}"
+                                                        <TextBlock Text="{Binding DateAndLength}"
                                                                    Foreground="#AAAAAA" FontSize="11" Margin="0,2,0,4" />
                                                         <TextBlock Text="{Binding Description}" ToolTip="{Binding Description}"
                                                                    Foreground="#CCCCCC" FontSize="12" TextWrapping="Wrap"
