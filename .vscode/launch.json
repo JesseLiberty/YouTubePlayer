@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "YouTubePlayer",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/YouTubePlayer/bin/Debug/net10.0-windows/YouTubePlayer.dll",
+      "cwd": "${workspaceFolder}/YouTubePlayer",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}
