@@ -15,12 +15,14 @@ public partial class MainWindow : Window
     private const string ColumnOrderFile = "column-order.json";
     private const string WatchedVideosFile = "watched-videos.json";
     private const string StartedVideosFile = "started-videos.json";
+    private const string KnownVideosFile = "known-videos.json";
 
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
     private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
     private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
     private readonly HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
+    private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
@@ -64,6 +66,7 @@ public partial class MainWindow : Window
                         if (!_hiddenVideoIds.Contains(video.VideoId))
                         {
                             video.WatchLevel = GetWatchLevel(video.VideoId);
+                            video.IsNew = !_knownVideoIds.Contains(video.VideoId);
                             column.Videos.Add(video);
                         }
                 }
@@ -74,6 +77,8 @@ public partial class MainWindow : Window
                 }
             }));
 
+            _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
+            LocalStore.Save(KnownVideosFile, _knownVideoIds);
             StatusText.Text = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
         catch (Exception ex)
@@ -173,6 +178,8 @@ public partial class MainWindow : Window
     private void Video_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: VideoItem video }) return;
+
+        video.IsNew = false;
 
         // Modal: control returns here when the video ends or the player is closed.
         var player = new PlayerWindow(video.VideoId, video.Title) { Owner = this };

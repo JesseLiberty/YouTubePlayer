@@ -71,6 +71,8 @@
                                                             <TextBlock Text="{Binding DateAndLength}" Foreground="#AAAAAA" FontSize="11" />
                                                             <TextBlock Text="{Binding WatchMark}" Foreground="#4CAF50" FontSize="11" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="{Binding WatchToolTip}" />
+                                                            <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
+                                                                       Margin="6,0,0,0" ToolTip="New video" />
                                                         </StackPanel>
                                                         <TextBlock Text="{Binding Description}" ToolTip="{Binding Description}"
                                                                    Foreground="#CCCCCC" FontSize="12" TextWrapping="Wrap"

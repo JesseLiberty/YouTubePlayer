@@ -14,6 +14,7 @@ public sealed class SeriesColumn
 public sealed class VideoItem : INotifyPropertyChanged
 {
     private WatchLevel _watchLevel;
+    private bool _isNew;
 
     public required string VideoId { get; init; }
     public required string Title { get; init; }
@@ -45,12 +46,26 @@ public sealed class VideoItem : INotifyPropertyChanged
         }
     }
 
+    public bool IsNew
+    {
+        get => _isNew;
+        set
+        {
+            if (_isNew == value) return;
+            _isNew = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNew)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NewMark)));
+        }
+    }
+
     public string WatchMark => WatchLevel switch
     {
         WatchLevel.Started => "\u2714",
         WatchLevel.Watched => "\u2714\u2714",
         _ => "",
     };
+
+    public string NewMark => IsNew ? "\u2605" : "";
 
     public string? WatchToolTip => WatchLevel switch
     {
