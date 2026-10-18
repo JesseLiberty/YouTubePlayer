@@ -7,11 +7,11 @@ namespace YouTubePlayer;
 
 public partial class PlayerWindow : Window
 {
-    // Persistent profile so a YouTube sign-in (Premium, history) is remembered between videos.
-    private static Task<CoreWebView2Environment>? s_environment;
+  // Persistent profile so a YouTube sign-in (Premium, history) is remembered between videos.
+  private static Task<CoreWebView2Environment>? s_environment;
 
-    // Reports playback position and watch progress for the main (non-ad) video.
-    private const string EndedScript = """
+  // Reports playback position and watch progress for the main (non-ad) video.
+  private const string EndedScript = """
         (() => {
           if (window.top !== window) return;
           const isMainVideo = v => {
@@ -55,55 +55,55 @@ public partial class PlayerWindow : Window
         })();
         """;
 
-    private readonly string _videoId;
-    private readonly int _startPositionSeconds;
+  private readonly string _videoId;
+  private readonly int _startPositionSeconds;
 
-    public WatchLevel WatchLevel { get; private set; }
-    public int? PositionSeconds { get; private set; }
+  public WatchLevel WatchLevel { get; private set; }
+  public int? PositionSeconds { get; private set; }
 
-    public PlayerWindow(string videoId, string title, int startPositionSeconds)
+  public PlayerWindow(string videoId, string title, int startPositionSeconds)
+  {
+    InitializeComponent();
+    _videoId = videoId;
+    _startPositionSeconds = startPositionSeconds;
+    Title = title;
+    Loaded += OnLoaded;
+    Closed += (_, _) => WebView.Dispose();
+  }
+
+  private async void OnLoaded(object sender, RoutedEventArgs e)
+  {
+    try
     {
-        InitializeComponent();
-        _videoId = videoId;
-      _startPositionSeconds = startPositionSeconds;
-        Title = title;
-        Loaded += OnLoaded;
-        Closed += (_, _) => WebView.Dispose();
-    }
+      s_environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(
+          Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YouTubePlayer", "WebView2"));
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+      await WebView.EnsureCoreWebView2Async(await s_environment);
+      var core = WebView.CoreWebView2;
+
+      core.WebMessageReceived += (_, args) =>
+      {
+        var message = args.TryGetWebMessageAsString();
+        if (message == "watched:" + _videoId) WatchLevel = WatchLevel.Watched;
+        else if (message == "started:" + _videoId && WatchLevel < WatchLevel.Started) WatchLevel = WatchLevel.Started;
+        else if (message.StartsWith("position:", StringComparison.Ordinal))
+        {
+          var parts = message.Split(':');
+          if (parts.Length == 3 && parts[1] == _videoId && int.TryParse(parts[2], out var positionSeconds))
+            PositionSeconds = positionSeconds;
+        }
+        else if (message == "ended") Close();
+      };
+      await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
+
+      var startTime = _startPositionSeconds > 0 ? $"&t={_startPositionSeconds}s" : "";
+      core.Navigate($"https://www.youtube.com/watch?v={Uri.EscapeDataString(_videoId)}{startTime}");
+    }
+    catch (WebView2RuntimeNotFoundException)
     {
-        try
-        {
-            s_environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YouTubePlayer", "WebView2"));
-
-            await WebView.EnsureCoreWebView2Async(await s_environment);
-            var core = WebView.CoreWebView2;
-
-            core.WebMessageReceived += (_, args) =>
-            {
-                var message = args.TryGetWebMessageAsString();
-                if (message == "watched:" + _videoId) WatchLevel = WatchLevel.Watched;
-                else if (message == "started:" + _videoId && WatchLevel < WatchLevel.Started) WatchLevel = WatchLevel.Started;
-                else if (message.StartsWith("position:", StringComparison.Ordinal))
-                {
-                  var parts = message.Split(':');
-                  if (parts.Length == 3 && parts[1] == _videoId && int.TryParse(parts[2], out var positionSeconds))
-                    PositionSeconds = positionSeconds;
-                }
-                else if (message == "ended") Close();
-            };
-            await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
-
-            var startTime = _startPositionSeconds > 0 ? $"&t={_startPositionSeconds}s" : "";
-            core.Navigate($"https://www.youtube.com/watch?v={Uri.EscapeDataString(_videoId)}{startTime}");
-        }
-        catch (WebView2RuntimeNotFoundException)
-        {
-            MessageBox.Show(this, "The Microsoft Edge WebView2 Runtime is required to play videos.",
-                "WebView2 missing", MessageBoxButton.OK, MessageBoxImage.Error);
-            Close();
-        }
+      MessageBox.Show(this, "The Microsoft Edge WebView2 Runtime is required to play videos.",
+          "WebView2 missing", MessageBoxButton.OK, MessageBoxImage.Error);
+      Close();
     }
+  }
 }
