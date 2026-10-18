@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using YouTubePlayer.Models;
 
 namespace YouTubePlayer;
 
@@ -9,7 +10,7 @@ public partial class PlayerWindow : Window
     // Persistent profile so a YouTube sign-in (Premium, history) is remembered between videos.
     private static Task<CoreWebView2Environment>? s_environment;
 
-    // Reports "watched:<id>" once the main (non-ad) video passes 90%, and "ended" when it finishes.
+    // Reports "started:<id>" once the main (non-ad) video plays, "watched:<id>" past 90%, and "ended" when it finishes.
     private const string EndedScript = """
         (() => {
           if (window.top !== window) return;
@@ -18,13 +19,18 @@ public partial class PlayerWindow : Window
             const player = v.closest('.html5-video-player');
             return !(player && player.classList.contains('ad-showing'));
           };
-          let reportedId = null;
+          let startedId = null, watchedId = null;
           document.addEventListener('timeupdate', e => {
             const v = e.target;
             if (!isMainVideo(v) || !v.duration) return;
             const id = new URLSearchParams(location.search).get('v');
-            if (id && id !== reportedId && v.currentTime / v.duration >= 0.9) {
-              reportedId = id;
+            if (!id) return;
+            if (id !== startedId && v.currentTime >= 1) {
+              startedId = id;
+              window.chrome.webview.postMessage('started:' + id);
+            }
+            if (id !== watchedId && v.currentTime / v.duration >= 0.9) {
+              watchedId = id;
               window.chrome.webview.postMessage('watched:' + id);
             }
           }, true);
@@ -36,7 +42,7 @@ public partial class PlayerWindow : Window
 
     private readonly string _videoId;
 
-    public bool Watched { get; private set; }
+    public WatchLevel WatchLevel { get; private set; }
 
     public PlayerWindow(string videoId, string title)
     {
@@ -60,7 +66,8 @@ public partial class PlayerWindow : Window
             core.WebMessageReceived += (_, args) =>
             {
                 var message = args.TryGetWebMessageAsString();
-                if (message == "watched:" + _videoId) Watched = true;
+                if (message == "watched:" + _videoId) WatchLevel = WatchLevel.Watched;
+                else if (message == "started:" + _videoId && WatchLevel < WatchLevel.Started) WatchLevel = WatchLevel.Started;
                 else if (message == "ended") Close();
             };
             await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);

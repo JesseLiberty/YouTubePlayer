@@ -5,7 +5,6 @@
         Title="YouTube Player" Height="850" Width="1400"
         WindowStartupLocation="CenterScreen" Background="#181818">
     <Window.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <Style x:Key="VideoCardStyle" TargetType="Button">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -70,9 +69,8 @@
                                                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" />
                                                         <StackPanel Orientation="Horizontal" Margin="0,2,0,4">
                                                             <TextBlock Text="{Binding DateAndLength}" Foreground="#AAAAAA" FontSize="11" />
-                                                            <TextBlock Text="&#x2714;" Foreground="#4CAF50" FontSize="11" FontWeight="Bold"
-                                                                       Margin="6,0,0,0" ToolTip="Watched"
-                                                                       Visibility="{Binding IsWatched, Converter={StaticResource BoolToVisibility}}" />
+                                                            <TextBlock Text="{Binding WatchMark}" Foreground="#4CAF50" FontSize="11" FontWeight="Bold"
+                                                                       Margin="6,0,0,0" ToolTip="{Binding WatchToolTip}" />
                                                         </StackPanel>
                                                         <TextBlock Text="{Binding Description}" ToolTip="{Binding Description}"
                                                                    Foreground="#CCCCCC" FontSize="12" TextWrapping="Wrap"
