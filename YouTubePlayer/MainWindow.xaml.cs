@@ -1,6 +1,9 @@
 ﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
 using YouTubePlayer.Models;
 using YouTubePlayer.Services;
 
@@ -8,8 +11,15 @@ namespace YouTubePlayer;
 
 public partial class MainWindow : Window
 {
+    private const string HiddenVideosFile = "hidden-videos.json";
+    private const string ColumnOrderFile = "column-order.json";
+
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
+    private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
+
+    private Point _dragStart;
+    private SeriesColumn? _dragCandidate;
 
     public MainWindow()
     {
@@ -27,7 +37,12 @@ public partial class MainWindow : Window
             var subscriptions = await _client.GetSubscriptionsAsync();
 
             _series.Clear();
-            foreach (var s in subscriptions)
+            var savedOrder = (LocalStore.Load<List<string>>(ColumnOrderFile) ?? [])
+                .Distinct()
+                .Select((channelId, index) => (channelId, index))
+                .ToDictionary(x => x.channelId, x => x.index);
+            // New subscriptions (not in the saved order) go at the end, still alphabetical.
+            foreach (var s in subscriptions.OrderBy(s => savedOrder.GetValueOrDefault(s.ChannelId, int.MaxValue)))
                 _series.Add(new SeriesColumn { SubscriptionId = s.SubscriptionId, ChannelId = s.ChannelId, Title = s.Title });
 
             StatusText.Text = $"Loading videos for {_series.Count} series...";
@@ -42,7 +57,8 @@ public partial class MainWindow : Window
                 try
                 {
                     foreach (var video in await _client.GetVideosAsync(playlistId))
-                        column.Videos.Add(video);
+                        if (!_hiddenVideoIds.Contains(video.VideoId))
+                            column.Videos.Add(video);
                 }
                 finally
                 {
@@ -84,6 +100,67 @@ public partial class MainWindow : Window
             button.IsEnabled = true;
             MessageBox.Show(this, ex.Message, "Unsubscribe failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void RemoveVideo_Click(object sender, RoutedEventArgs e)
+    {
+        // Stop the click from bubbling to the card and starting playback.
+        e.Handled = true;
+        if (sender is not Button { Tag: VideoItem video }) return;
+
+        _series.FirstOrDefault(c => c.Videos.Contains(video))?.Videos.Remove(video);
+        _hiddenVideoIds.Add(video.VideoId);
+        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        StatusText.Text = $"Removed \"{video.Title}\".";
+    }
+
+    private void ColumnHeader_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Don't start a drag when the press is on the Unsubscribe button.
+        _dragCandidate = IsInsideButton(e.OriginalSource as DependencyObject)
+            ? null
+            : (sender as FrameworkElement)?.DataContext as SeriesColumn;
+        _dragStart = e.GetPosition(this);
+    }
+
+    private void ColumnHeader_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragCandidate is null || e.LeftButton != MouseButtonState.Pressed) return;
+
+        var delta = e.GetPosition(this) - _dragStart;
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        var column = _dragCandidate;
+        _dragCandidate = null;
+        DragDrop.DoDragDrop((DependencyObject)sender, column, DragDropEffects.Move);
+    }
+
+    private void Column_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(SeriesColumn)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Column_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(SeriesColumn)) is not SeriesColumn source ||
+            (sender as FrameworkElement)?.DataContext is not SeriesColumn target ||
+            source == target) return;
+
+        _series.Move(_series.IndexOf(source), _series.IndexOf(target));
+        LocalStore.Save(ColumnOrderFile, _series.Select(c => c.ChannelId).ToList());
+        StatusText.Text = $"Moved {source.Title}.";
+    }
+
+    private static bool IsInsideButton(DependencyObject? element)
+    {
+        while (element is not null)
+        {
+            if (element is ButtonBase) return true;
+            element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element);
+        }
+        return false;
     }
 
     private void Video_Click(object sender, RoutedEventArgs e)
