@@ -47,12 +47,33 @@
                                 AllowDrop="True" DragOver="Column_DragOver" Drop="Column_Drop">
                             <DockPanel>
                                 <DockPanel DockPanel.Dock="Top" Margin="8" Background="Transparent"
-                                           ToolTip="Drag to reorder"
                                            PreviewMouseLeftButtonDown="ColumnHeader_PreviewMouseLeftButtonDown"
                                            MouseMove="ColumnHeader_MouseMove">
+                                    <DockPanel.Style>
+                                        <Style TargetType="DockPanel">
+                                            <Setter Property="ToolTip" Value="Drag to reorder" />
+                                            <Setter Property="Cursor" Value="SizeAll" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsImportantColumn}" Value="True">
+                                                    <Setter Property="ToolTip" Value="{x:Null}" />
+                                                    <Setter Property="Cursor" Value="Arrow" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DockPanel.Style>
                                     <Button DockPanel.Dock="Right" Content="Unsubscribe" Padding="6,2"
-                                            Tag="{Binding}" Click="Unsubscribe_Click" />
-                                    <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" Cursor="SizeAll"
+                                            Tag="{Binding}" Click="Unsubscribe_Click">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsImportantColumn}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14"
                                                Foreground="White" TextTrimming="CharacterEllipsis"
                                                VerticalAlignment="Center" Margin="0,0,8,0" />
                                 </DockPanel>
@@ -60,7 +81,8 @@
                                     <ItemsControl ItemsSource="{Binding Videos}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate DataType="{x:Type models:VideoItem}">
-                                                <Button Style="{StaticResource VideoCardStyle}" Tag="{Binding}" Click="Video_Click">
+                                                <Button Style="{StaticResource VideoCardStyle}" Tag="{Binding}" Click="Video_Click"
+                                                    PreviewMouseRightButtonDown="Video_PreviewMouseRightButtonDown">
                                                     <DockPanel>
                                                     <Button DockPanel.Dock="Right" VerticalAlignment="Top" Content="&#x2715;"
                                                             Width="22" Height="22" Margin="6,0,0,0" Padding="0"
@@ -71,6 +93,8 @@
                                                             <TextBlock Text="{Binding DateAndLength}" Foreground="#AAAAAA" FontSize="11" />
                                                             <TextBlock Text="{Binding WatchMark}" Foreground="#4CAF50" FontSize="11" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="{Binding WatchToolTip}" />
+                                                            <TextBlock Text="{Binding ImportantMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
+                                                                       Margin="6,0,0,0" ToolTip="Important video" />
                                                             <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="New video" />
                                                         </StackPanel>

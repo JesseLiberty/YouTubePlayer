@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using YouTubePlayer.Models;
@@ -17,14 +18,23 @@ public partial class MainWindow : Window
     private const string StartedVideosFile = "started-videos.json";
     private const string KnownVideosFile = "known-videos.json";
     private const string VideoPositionsFile = "video-positions.json";
+    private const string ImportantVideosFile = "important-videos.json";
 
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
+    private readonly SeriesColumn _importantColumn = new()
+    {
+        SubscriptionId = "",
+        ChannelId = "",
+        Title = "Important",
+        IsImportantColumn = true,
+    };
     private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
     private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
     private readonly HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
     private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
     private readonly Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
+    private readonly HashSet<string> _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
@@ -32,7 +42,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        SeriesItems.ItemsSource = _series;
+        SeriesItems.ItemsSource = new CompositeCollection
+        {
+            _importantColumn,
+            new CollectionContainer { Collection = _series },
+        };
         StatusText.Text = "Click Sync to load your subscriptions.";
     }
 
@@ -45,6 +59,7 @@ public partial class MainWindow : Window
             var subscriptions = await _client.GetSubscriptionsAsync();
 
             _series.Clear();
+            _importantColumn.Videos.Clear();
             var savedOrder = (LocalStore.Load<List<string>>(ColumnOrderFile) ?? [])
                 .Distinct()
                 .Select((channelId, index) => (channelId, index))
@@ -68,9 +83,12 @@ public partial class MainWindow : Window
                         if (!_hiddenVideoIds.Contains(video.VideoId))
                         {
                             video.WatchLevel = GetWatchLevel(video.VideoId);
+                            video.IsImportant = _importantVideoIds.Contains(video.VideoId);
                             video.IsNew = !_knownVideoIds.Contains(video.VideoId);
                             video.PositionSeconds = _videoPositions.GetValueOrDefault(video.VideoId);
                             column.Videos.Add(video);
+                            if (video.IsImportant)
+                                _importantColumn.Videos.Add(video);
                         }
                 }
                 finally
@@ -97,7 +115,7 @@ public partial class MainWindow : Window
 
     private async void Unsubscribe_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: SeriesColumn column } button) return;
+        if (sender is not Button { Tag: SeriesColumn { IsImportantColumn: false } column } button) return;
 
         var answer = MessageBox.Show(this, $"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
             MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -108,6 +126,8 @@ public partial class MainWindow : Window
         {
             await _client.UnsubscribeAsync(column.SubscriptionId);
             _series.Remove(column);
+            foreach (var video in column.Videos)
+                _importantColumn.Videos.Remove(video);
             StatusText.Text = $"Unsubscribed from {column.Title}.";
         }
         catch (Exception ex)
@@ -124,6 +144,7 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: VideoItem video }) return;
 
         _series.FirstOrDefault(c => c.Videos.Contains(video))?.Videos.Remove(video);
+        _importantColumn.Videos.Remove(video);
         _hiddenVideoIds.Add(video.VideoId);
         LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
         StatusText.Text = $"Removed \"{video.Title}\".";
@@ -135,6 +156,8 @@ public partial class MainWindow : Window
         _dragCandidate = IsInsideButton(e.OriginalSource as DependencyObject)
             ? null
             : (sender as FrameworkElement)?.DataContext as SeriesColumn;
+        if (_dragCandidate?.IsImportantColumn == true)
+            _dragCandidate = null;
         _dragStart = e.GetPosition(this);
     }
 
@@ -153,7 +176,9 @@ public partial class MainWindow : Window
 
     private void Column_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(SeriesColumn)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(typeof(SeriesColumn)) &&
+            (sender as FrameworkElement)?.DataContext is SeriesColumn { IsImportantColumn: false }
+            ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
@@ -161,7 +186,7 @@ public partial class MainWindow : Window
     {
         if (e.Data.GetData(typeof(SeriesColumn)) is not SeriesColumn source ||
             (sender as FrameworkElement)?.DataContext is not SeriesColumn target ||
-            source == target) return;
+            source == target || source.IsImportantColumn || target.IsImportantColumn) return;
 
         _series.Move(_series.IndexOf(source), _series.IndexOf(target));
         LocalStore.Save(ColumnOrderFile, _series.Select(c => c.ChannelId).ToList());
@@ -176,6 +201,25 @@ public partial class MainWindow : Window
             element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element);
         }
         return false;
+    }
+
+    private void Video_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Button { Tag: VideoItem video }) return;
+
+        e.Handled = true;
+        video.IsImportant = !video.IsImportant;
+        if (video.IsImportant)
+        {
+            _importantVideoIds.Add(video.VideoId);
+            _importantColumn.Videos.Add(video);
+        }
+        else
+        {
+            _importantVideoIds.Remove(video.VideoId);
+            _importantColumn.Videos.Remove(video);
+        }
+        LocalStore.Save(ImportantVideosFile, _importantVideoIds);
     }
 
     private void Video_Click(object sender, RoutedEventArgs e)

@@ -8,6 +8,7 @@ public sealed class SeriesColumn
     public required string SubscriptionId { get; init; }
     public required string ChannelId { get; init; }
     public required string Title { get; init; }
+    public bool IsImportantColumn { get; init; }
     public ObservableCollection<VideoItem> Videos { get; } = new();
 }
 
@@ -15,6 +16,7 @@ public sealed class VideoItem : INotifyPropertyChanged
 {
     private WatchLevel _watchLevel;
     private bool _isNew;
+    private bool _isImportant;
     private int _positionSeconds;
 
     public required string VideoId { get; init; }
@@ -71,6 +73,20 @@ public sealed class VideoItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NewMark)));
         }
     }
+
+    public bool IsImportant
+    {
+        get => _isImportant;
+        set
+        {
+            if (_isImportant == value) return;
+            _isImportant = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsImportant)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ImportantMark)));
+        }
+    }
+
+    public string ImportantMark => IsImportant ? "!" : "";
 
     public string WatchMark => WatchLevel switch
     {
