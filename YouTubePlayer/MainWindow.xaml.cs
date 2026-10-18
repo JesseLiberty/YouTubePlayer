@@ -185,7 +185,7 @@ public partial class MainWindow : Window
         video.IsNew = false;
 
         // Modal: control returns here when the video ends or the player is closed.
-        var player = new PlayerWindow(video.VideoId, video.Title) { Owner = this };
+        var player = new PlayerWindow(video.VideoId, video.Title, video.PositionSeconds) { Owner = this };
         player.ShowDialog();
 
         if (player.WatchLevel >= WatchLevel.Started && _startedVideoIds.Add(video.VideoId))

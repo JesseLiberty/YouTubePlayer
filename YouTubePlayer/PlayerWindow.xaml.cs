@@ -56,14 +56,16 @@ public partial class PlayerWindow : Window
         """;
 
     private readonly string _videoId;
+    private readonly int _startPositionSeconds;
 
     public WatchLevel WatchLevel { get; private set; }
     public int? PositionSeconds { get; private set; }
 
-    public PlayerWindow(string videoId, string title)
+    public PlayerWindow(string videoId, string title, int startPositionSeconds)
     {
         InitializeComponent();
         _videoId = videoId;
+      _startPositionSeconds = startPositionSeconds;
         Title = title;
         Loaded += OnLoaded;
         Closed += (_, _) => WebView.Dispose();
@@ -94,7 +96,8 @@ public partial class PlayerWindow : Window
             };
             await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
 
-            core.Navigate($"https://www.youtube.com/watch?v={Uri.EscapeDataString(_videoId)}");
+            var startTime = _startPositionSeconds > 0 ? $"&t={_startPositionSeconds}s" : "";
+            core.Navigate($"https://www.youtube.com/watch?v={Uri.EscapeDataString(_videoId)}{startTime}");
         }
         catch (WebView2RuntimeNotFoundException)
         {

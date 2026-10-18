@@ -29,9 +29,9 @@ public sealed class VideoItem : INotifyPropertyChanged
         {
             var date = PublishedAt?.ToString("MMM d, yyyy") ?? "";
             if (Duration is not { Ticks: > 0 } d) return date;
-            var elapsedMinutes = (int)Math.Round(PositionSeconds / 60.0, MidpointRounding.AwayFromZero);
-            var totalMinutes = (int)Math.Round(d.TotalMinutes, MidpointRounding.AwayFromZero);
-            return $"{date}  ·  {elapsedMinutes}:{totalMinutes}";
+            var elapsedMinutes = PositionSeconds / 60;
+            var elapsedSeconds = PositionSeconds % 60;
+            return $"{date}  ·  {elapsedMinutes}:{elapsedSeconds:00}|{d.TotalMinutes:F1}";
         }
     }
 
