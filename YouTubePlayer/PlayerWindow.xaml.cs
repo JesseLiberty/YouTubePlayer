@@ -9,22 +9,34 @@ public partial class PlayerWindow : Window
     // Persistent profile so a YouTube sign-in (Premium, history) is remembered between videos.
     private static Task<CoreWebView2Environment>? s_environment;
 
-    // Signals the host when the main (non-ad) video on a watch page finishes.
+    // Reports "watched:<id>" once the main (non-ad) video passes 90%, and "ended" when it finishes.
     private const string EndedScript = """
         (() => {
           if (window.top !== window) return;
-          document.addEventListener('ended', e => {
-            const v = e.target;
-            if (!(v instanceof HTMLVideoElement)) return;
+          const isMainVideo = v => {
+            if (!(v instanceof HTMLVideoElement) || !location.pathname.startsWith('/watch')) return false;
             const player = v.closest('.html5-video-player');
-            if (player && player.classList.contains('ad-showing')) return;
-            if (!location.pathname.startsWith('/watch')) return;
-            window.chrome.webview.postMessage('ended');
+            return !(player && player.classList.contains('ad-showing'));
+          };
+          let reportedId = null;
+          document.addEventListener('timeupdate', e => {
+            const v = e.target;
+            if (!isMainVideo(v) || !v.duration) return;
+            const id = new URLSearchParams(location.search).get('v');
+            if (id && id !== reportedId && v.currentTime / v.duration >= 0.9) {
+              reportedId = id;
+              window.chrome.webview.postMessage('watched:' + id);
+            }
+          }, true);
+          document.addEventListener('ended', e => {
+            if (isMainVideo(e.target)) window.chrome.webview.postMessage('ended');
           }, true);
         })();
         """;
 
     private readonly string _videoId;
+
+    public bool Watched { get; private set; }
 
     public PlayerWindow(string videoId, string title)
     {
@@ -47,7 +59,9 @@ public partial class PlayerWindow : Window
 
             core.WebMessageReceived += (_, args) =>
             {
-                if (args.TryGetWebMessageAsString() == "ended") Close();
+                var message = args.TryGetWebMessageAsString();
+                if (message == "watched:" + _videoId) Watched = true;
+                else if (message == "ended") Close();
             };
             await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 
 namespace YouTubePlayer.Models;
 
@@ -10,8 +11,10 @@ public sealed class SeriesColumn
     public ObservableCollection<VideoItem> Videos { get; } = new();
 }
 
-public sealed class VideoItem
+public sealed class VideoItem : INotifyPropertyChanged
 {
+    private bool _isWatched;
+
     public required string VideoId { get; init; }
     public required string Title { get; init; }
     public string Description { get; init; } = "";
@@ -28,4 +31,17 @@ public sealed class VideoItem
             return $"{date}  ·  {length}";
         }
     }
+
+    public bool IsWatched
+    {
+        get => _isWatched;
+        set
+        {
+            if (_isWatched == value) return;
+            _isWatched = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWatched)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

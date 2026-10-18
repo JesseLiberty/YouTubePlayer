@@ -13,10 +13,12 @@ public partial class MainWindow : Window
 {
     private const string HiddenVideosFile = "hidden-videos.json";
     private const string ColumnOrderFile = "column-order.json";
+    private const string WatchedVideosFile = "watched-videos.json";
 
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
     private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
+    private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
@@ -58,7 +60,10 @@ public partial class MainWindow : Window
                 {
                     foreach (var video in await _client.GetVideosAsync(playlistId))
                         if (!_hiddenVideoIds.Contains(video.VideoId))
+                        {
+                            video.IsWatched = _watchedVideoIds.Contains(video.VideoId);
                             column.Videos.Add(video);
+                        }
                 }
                 finally
                 {
@@ -168,7 +173,13 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: VideoItem video }) return;
 
         // Modal: control returns here when the video ends or the player is closed.
-        new PlayerWindow(video.VideoId, video.Title) { Owner = this }.ShowDialog();
+        var player = new PlayerWindow(video.VideoId, video.Title) { Owner = this };
+        player.ShowDialog();
+        if (player.Watched && _watchedVideoIds.Add(video.VideoId))
+        {
+            video.IsWatched = true;
+            LocalStore.Save(WatchedVideosFile, _watchedVideoIds);
+        }
         Activate();
     }
 }
