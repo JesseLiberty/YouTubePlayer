@@ -62,6 +62,7 @@ public partial class MainWindow : Window
 
             _series.Clear();
             _importantColumn.Videos.Clear();
+            DetailsPane.DataContext = null;
             var savedOrder = (LocalStore.Load<List<string>>(ColumnOrderFile) ?? [])
                 .Distinct()
                 .Select((channelId, index) => (channelId, index))
@@ -131,6 +132,8 @@ public partial class MainWindow : Window
             _series.Remove(column);
             foreach (var video in column.Videos)
                 _importantColumn.Videos.Remove(video);
+            if (DetailsPane.DataContext is VideoItem selected && column.Videos.Contains(selected))
+                DetailsPane.DataContext = null;
             StatusText.Text = $"Unsubscribed from {column.Title}.";
         }
         catch (Exception ex)
@@ -154,6 +157,8 @@ public partial class MainWindow : Window
         var importantIndex = _importantColumn.Videos.IndexOf(video);
         column.Videos.RemoveAt(index);
         _importantColumn.Videos.Remove(video);
+        if (ReferenceEquals(DetailsPane.DataContext, video))
+            DetailsPane.DataContext = null;
         _hiddenVideoIds.Add(video.VideoId);
         LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
         _removedVideo = (video, column, index, importantIndex);
@@ -225,9 +230,9 @@ public partial class MainWindow : Window
         StatusText.Text = $"Moved {source.Title}.";
     }
 
-    private static bool IsInsideButton(DependencyObject? element)
+    private static bool IsInsideButton(DependencyObject? element, ButtonBase? boundary = null)
     {
-        while (element is not null)
+        while (element is not null && element != boundary)
         {
             if (element is ButtonBase) return true;
             element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element);
@@ -240,6 +245,11 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: VideoItem video }) return;
 
         e.Handled = true;
+        ToggleImportance(video);
+    }
+
+    private void ToggleImportance(VideoItem video)
+    {
         ClearUndo();
         video.IsImportant = !video.IsImportant;
         if (video.IsImportant)
@@ -260,10 +270,56 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: VideoItem video }) return;
 
         ClearUndo();
+        DetailsPane.DataContext = video;
+    }
+
+    private void Video_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left ||
+            sender is not Button { Tag: VideoItem video } button ||
+            IsInsideButton(e.OriginalSource as DependencyObject, button)) return;
+
+        e.Handled = true;
+        DetailsPane.DataContext = video;
+        PlayVideo(video, video.PositionSeconds);
+    }
+
+    private void Details_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DetailsPane.DataContext is not VideoItem video) return;
+
+        e.Handled = true;
+        ToggleImportance(video);
+    }
+
+    private void Details_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DetailsPane.DataContext is not VideoItem video ||
+            IsInsideButton(e.OriginalSource as DependencyObject)) return;
+
+        ClearUndo();
+        if (e.ClickCount != 2) return;
+
+        e.Handled = true;
+        PlayVideo(video, video.PositionSeconds);
+    }
+
+    private void Chapter_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Button { DataContext: VideoChapter chapter } ||
+            DetailsPane.DataContext is not VideoItem video) return;
+
+        PlayVideo(video, chapter.OffsetSeconds);
+    }
+
+    private void PlayVideo(VideoItem video, int startPositionSeconds)
+    {
+        ClearUndo();
         video.IsNew = false;
 
         // Modal: control returns here when the video ends or the player is closed.
-        var player = new PlayerWindow(video.VideoId, video.Title, video.PositionSeconds) { Owner = this };
+        var player = new PlayerWindow(video.VideoId, video.Title, startPositionSeconds) { Owner = this };
         player.ShowDialog();
 
         if (player.WatchLevel >= WatchLevel.Started && _startedVideoIds.Add(video.VideoId))

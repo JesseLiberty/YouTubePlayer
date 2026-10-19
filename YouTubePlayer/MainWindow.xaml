@@ -25,7 +25,12 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="2*" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+    <DockPanel Grid.Column="0">
         <Border DockPanel.Dock="Top" Background="#202020" Padding="8">
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="SyncButton" Content="Sync" Width="100" Padding="4" Background="#4CAF50"
@@ -99,6 +104,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate DataType="{x:Type models:VideoItem}">
                                                 <Button Style="{StaticResource VideoCardStyle}" Tag="{Binding}" Click="Video_Click"
+                                                    MouseDoubleClick="Video_MouseDoubleClick"
                                                     PreviewMouseRightButtonDown="Video_PreviewMouseRightButtonDown">
                                                     <DockPanel>
                                                     <Button DockPanel.Dock="Right" VerticalAlignment="Top" Content="&#x2715;"
@@ -115,7 +121,7 @@
                                                             <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="New video" />
                                                         </StackPanel>
-                                                        <TextBlock Text="{Binding Description}" ToolTip="{Binding Description}"
+                                                        <TextBlock Text="{Binding Description}"
                                                                    Foreground="#CCCCCC" FontSize="12" TextWrapping="Wrap"
                                                                    TextTrimming="WordEllipsis" MaxHeight="64" />
                                                     </StackPanel>
@@ -132,4 +138,43 @@
             </ItemsControl>
         </ScrollViewer>
     </DockPanel>
+        <Border x:Name="DetailsPane" Grid.Column="1" Background="#202020" Padding="16"
+                BorderBrush="#444444" BorderThickness="1,0,0,0"
+                PreviewMouseRightButtonDown="Details_PreviewMouseRightButtonDown"
+                PreviewMouseLeftButtonDown="Details_PreviewMouseLeftButtonDown">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold"
+                               Foreground="White" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <WrapPanel Margin="0,0,0,16">
+                        <TextBlock Text="{Binding PublishedDate}" Foreground="#AAAAAA" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontWeight="Bold" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding WatchMark}" Foreground="#4CAF50" FontWeight="Bold" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding PlaybackTime}" Foreground="#AAAAAA" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding ImportantMark}" Foreground="#FFD54F" FontWeight="Bold" />
+                    </WrapPanel>
+                    <ItemsControl ItemsSource="{Binding Chapters}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type models:VideoChapter}">
+                                <Button Click="Chapter_Click" Cursor="Hand" Margin="0,0,0,6" Padding="6"
+                                        HorizontalContentAlignment="Stretch" Background="#2C2C2C" Foreground="White"
+                                        BorderThickness="0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Timestamp}" Foreground="#80CBC4" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding DetailsDescription}" Foreground="#CCCCCC" FontSize="12"
+                               TextWrapping="Wrap" Margin="0,12,0,0" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
 </Window>
