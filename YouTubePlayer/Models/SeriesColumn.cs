@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 
 namespace YouTubePlayer.Models;
 
@@ -18,12 +19,23 @@ public sealed class VideoItem : INotifyPropertyChanged
     private bool _isNew;
     private bool _isImportant;
     private int _positionSeconds;
+    private (IReadOnlyList<VideoChapter> Chapters, string Description)? _details;
 
     public required string VideoId { get; init; }
     public required string Title { get; init; }
     public string Description { get; init; } = "";
     public DateTime? PublishedAt { get; init; }
     public TimeSpan? Duration { get; init; }
+
+    private (IReadOnlyList<VideoChapter> Chapters, string Description) Details =>
+        _details ??= VideoChapter.ParseDescription(Description);
+
+    public IReadOnlyList<VideoChapter> Chapters => Details.Chapters;
+    public string DetailsDescription => Details.Description;
+    public string PublishedDate => PublishedAt?.ToString("MMM d, yyyy") ?? "";
+    public string PlaybackTime => Duration is { Ticks: > 0 } duration
+        ? $"{VideoChapter.FormatTime(PositionSeconds)} / {VideoChapter.FormatTime((int)duration.TotalSeconds)}"
+        : VideoChapter.FormatTime(PositionSeconds);
 
     public string DateAndLength
     {
@@ -46,6 +58,7 @@ public sealed class VideoItem : INotifyPropertyChanged
             _positionSeconds = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PositionSeconds)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DateAndLength)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlaybackTime)));
         }
     }
 
@@ -105,6 +118,42 @@ public sealed class VideoItem : INotifyPropertyChanged
     };
 
     public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed record VideoChapter(string Title, int OffsetSeconds)
+{
+    private static readonly Regex ChapterPattern = new(
+        @"^\s*[\[(]?(?<time>(?:\d{1,3}:)?\d{1,2}:\d{2})[\])]?\s*(?:[-\u2013\u2014|]\s*)?(?<title>\S.*)$",
+        RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    public string Timestamp => FormatTime(OffsetSeconds);
+
+    public static string FormatTime(int seconds) => seconds >= 3600
+        ? $"{seconds / 3600}:{seconds / 60 % 60:00}:{seconds % 60:00}"
+        : $"{seconds / 60}:{seconds % 60:00}";
+
+    public static (IReadOnlyList<VideoChapter> Chapters, string Description) ParseDescription(string description)
+    {
+        var chapters = new List<VideoChapter>();
+        var remaining = new List<string>();
+        foreach (var line in description.Split('\n'))
+        {
+            var match = ChapterPattern.Match(line.TrimEnd('\r'));
+            if (match.Success)
+            {
+                var parts = match.Groups["time"].Value.Split(':').Select(int.Parse).ToArray();
+                if (parts[^1] < 60 && (parts.Length == 2 || parts[^2] < 60))
+                {
+                    var seconds = parts.Length == 3 ? parts[0] * 3600 : 0;
+                    seconds += parts[^2] * 60 + parts[^1];
+                    chapters.Add(new VideoChapter(match.Groups["title"].Value.Trim(), seconds));
+                    continue;
+                }
+            }
+            remaining.Add(line.TrimEnd('\r'));
+        }
+        return (chapters, string.Join(Environment.NewLine, remaining).Trim());
+    }
 }
 
 public enum WatchLevel
