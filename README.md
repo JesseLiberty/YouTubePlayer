@@ -12,7 +12,6 @@ A player for syncing with and managing all of your YouTube subscriptions.
 * Single click on card displays details
 * If details contain chapters, clicking on a chapter brings you there
 
-
 ## Standalone Windows Executable
 
 Publish a self-contained, single-file Windows x64 build:
