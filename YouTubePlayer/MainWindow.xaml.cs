@@ -14,6 +14,9 @@ public partial class MainWindow : Window
 {
     private const string HiddenVideosFile = "hidden-videos.json";
     private const string ColumnOrderFile = "column-order.json";
+    private const string VideoOrderFile = "video-order.json";
+    private const string VideoDragDataFormat = "YouTubePlayer.VideoDrag";
+    private const string ImportantColumnOrderKey = "__important__";
     private const string WatchedVideosFile = "watched-videos.json";
     private const string StartedVideosFile = "started-videos.json";
     private const string KnownVideosFile = "known-videos.json";
@@ -35,9 +38,13 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
     private readonly Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
     private readonly HashSet<string> _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
+    private readonly Dictionary<string, List<string>> _videoOrder = LocalStore.Load<Dictionary<string, List<string>>>(VideoOrderFile) ?? [];
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
+    private Point _videoDragStart;
+    private VideoDrag? _videoDragCandidate;
+    private VideoDrag? _activeVideoDrag;
     private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
 
     public MainWindow()
@@ -57,6 +64,7 @@ public partial class MainWindow : Window
             "\u00A9 Copyright 2026 Jesse Liberty\n\n" +
             "\u2022 Double click to go to the video at last offset viewed\n" +
             "\u2022 Single click to open details view\n" +
+            "\u2022 Drag a card to reorder videos within its column\n" +
             "\u2022 Right click on the card to toggle important ( ! ) and add to the important (first) column\n" +
             "\u2022 Double click on the detail page to go to the video at your last offset.\n" +
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.";
@@ -113,6 +121,9 @@ public partial class MainWindow : Window
                     StatusText.Text = $"Loaded {++loaded} of {_series.Count} series...";
                 }
             }));
+
+            foreach (var column in _series.Append(_importantColumn))
+                RestoreVideoOrder(column);
 
             _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             LocalStore.Save(KnownVideosFile, _knownVideoIds);
@@ -226,6 +237,15 @@ public partial class MainWindow : Window
 
     private void Column_DragOver(object sender, DragEventArgs e)
     {
+        if (e.Data.GetDataPresent(VideoDragDataFormat, false))
+        {
+            e.Effects = _activeVideoDrag is { } videoDrag &&
+                (sender as FrameworkElement)?.DataContext is SeriesColumn target && target == videoDrag.Column
+                ? DragDropEffects.Move : DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         e.Effects = e.Data.GetDataPresent(typeof(SeriesColumn)) &&
             (sender as FrameworkElement)?.DataContext is SeriesColumn { IsImportantColumn: false }
             ? DragDropEffects.Move : DragDropEffects.None;
@@ -285,6 +305,103 @@ public partial class MainWindow : Window
         ClearUndo();
         DetailsPane.DataContext = video;
     }
+
+    private void Video_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Button { Tag: VideoItem video } card) return;
+
+        var column = FindColumn(card);
+        _videoDragCandidate = column is null || IsInsideButton(e.OriginalSource as DependencyObject, card)
+            ? null
+            : new VideoDrag(column, video);
+        _videoDragStart = e.GetPosition(this);
+    }
+
+    private void Video_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_videoDragCandidate is not { } candidate || e.LeftButton != MouseButtonState.Pressed) return;
+
+        var delta = e.GetPosition(this) - _videoDragStart;
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        _videoDragCandidate = null;
+        ClearUndo();
+        _activeVideoDrag = candidate;
+        var dragData = new DataObject(VideoDragDataFormat, candidate.Video.VideoId, false);
+        try
+        {
+            DragDrop.DoDragDrop((DependencyObject)sender, dragData, DragDropEffects.Move);
+        }
+        finally
+        {
+            _activeVideoDrag = null;
+        }
+    }
+
+    private void Video_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(VideoDragDataFormat, false)) return;
+
+        var targetColumn = sender is Button card ? FindColumn(card) : null;
+        e.Effects = _activeVideoDrag is { } source && targetColumn == source.Column
+            ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Video_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(VideoDragDataFormat, false) is not string videoId ||
+            _activeVideoDrag is not { } source || source.Video.VideoId != videoId ||
+            sender is not Button { Tag: VideoItem targetVideo } targetCard ||
+            FindColumn(targetCard) is not { } column || column != source.Column) return;
+
+        var oldIndex = column.Videos.IndexOf(source.Video);
+        var newIndex = column.Videos.IndexOf(targetVideo);
+        if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex) return;
+
+        column.Videos.Move(oldIndex, newIndex);
+        SaveVideoOrder(column);
+        StatusText.Text = $"Moved \"{source.Video.Title}\".";
+        e.Handled = true;
+    }
+
+    private static SeriesColumn? FindColumn(DependencyObject element)
+    {
+        while (element is not null)
+        {
+            if (element is ItemsControl { DataContext: SeriesColumn column })
+                return column;
+            element = element is Visual ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element);
+        }
+        return null;
+    }
+
+    private void RestoreVideoOrder(SeriesColumn column)
+    {
+        var order = _videoOrder.GetValueOrDefault(GetVideoOrderKey(column)) ?? [];
+        var positions = order.Distinct()
+            .Select((videoId, index) => (videoId, index))
+            .ToDictionary(item => item.videoId, item => item.index);
+        var orderedVideos = column.Videos
+            .OrderBy(video => positions.GetValueOrDefault(video.VideoId, int.MaxValue))
+            .ToList();
+
+        column.Videos.Clear();
+        foreach (var video in orderedVideos)
+            column.Videos.Add(video);
+    }
+
+    private void SaveVideoOrder(SeriesColumn column)
+    {
+        _videoOrder[GetVideoOrderKey(column)] = column.Videos.Select(video => video.VideoId).ToList();
+        LocalStore.Save(VideoOrderFile, _videoOrder);
+    }
+
+    private static string GetVideoOrderKey(SeriesColumn column) =>
+        column.IsImportantColumn ? ImportantColumnOrderKey : column.ChannelId;
+
+    private sealed record VideoDrag(SeriesColumn Column, VideoItem Video);
 
     private void Video_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
