@@ -54,7 +54,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type models:SeriesColumn}">
                         <Border Width="320" Margin="6" Background="#232323" CornerRadius="4"
-                                AllowDrop="True" DragOver="Column_DragOver" Drop="Column_Drop">
+                            AllowDrop="True" DragOver="Column_DragOver" Drop="Column_Drop">
                             <DockPanel>
                                 <DockPanel DockPanel.Dock="Top" Margin="8" Background="Transparent"
                                            PreviewMouseLeftButtonDown="ColumnHeader_PreviewMouseLeftButtonDown"
@@ -105,7 +105,10 @@
                                     <ItemsControl ItemsSource="{Binding Videos}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate DataType="{x:Type models:VideoItem}">
-                                                <Button Style="{StaticResource VideoCardStyle}" Tag="{Binding}" Click="Video_Click"
+                                                <Button Style="{StaticResource VideoCardStyle}" Tag="{Binding}" ToolTip="Drag to reorder within this column"
+                                                    AllowDrop="True" PreviewMouseLeftButtonDown="Video_PreviewMouseLeftButtonDown"
+                                                    PreviewMouseMove="Video_MouseMove" DragOver="Video_DragOver" Drop="Video_Drop"
+                                                    Click="Video_Click"
                                                     MouseDoubleClick="Video_MouseDoubleClick"
                                                     PreviewMouseRightButtonDown="Video_PreviewMouseRightButtonDown">
                                                     <DockPanel>
