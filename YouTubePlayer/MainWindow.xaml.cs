@@ -38,6 +38,7 @@ public partial class MainWindow : Window
 
     private Point _dragStart;
     private SeriesColumn? _dragCandidate;
+    private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
 
     public MainWindow()
     {
@@ -52,6 +53,7 @@ public partial class MainWindow : Window
 
     private async void SyncButton_Click(object sender, RoutedEventArgs e)
     {
+        ClearUndo();
         SyncButton.IsEnabled = false;
         try
         {
@@ -117,6 +119,7 @@ public partial class MainWindow : Window
     {
         if (sender is not Button { Tag: SeriesColumn { IsImportantColumn: false } column } button) return;
 
+        ClearUndo();
         var answer = MessageBox.Show(this, $"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
             MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return;
@@ -143,11 +146,39 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (sender is not Button { Tag: VideoItem video }) return;
 
-        _series.FirstOrDefault(c => c.Videos.Contains(video))?.Videos.Remove(video);
+        ClearUndo();
+        var column = _series.FirstOrDefault(c => c.Videos.Contains(video));
+        if (column is null) return;
+
+        var index = column.Videos.IndexOf(video);
+        var importantIndex = _importantColumn.Videos.IndexOf(video);
+        column.Videos.RemoveAt(index);
         _importantColumn.Videos.Remove(video);
         _hiddenVideoIds.Add(video.VideoId);
         LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        _removedVideo = (video, column, index, importantIndex);
+        UndoButton.Visibility = Visibility.Visible;
         StatusText.Text = $"Removed \"{video.Title}\".";
+    }
+
+    private void UndoButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_removedVideo is not { } removed) return;
+
+        _hiddenVideoIds.Remove(removed.Video.VideoId);
+        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        removed.Column.Videos.Insert(Math.Min(removed.Index, removed.Column.Videos.Count), removed.Video);
+        if (removed.ImportantIndex >= 0)
+            _importantColumn.Videos.Insert(
+                Math.Min(removed.ImportantIndex, _importantColumn.Videos.Count), removed.Video);
+        ClearUndo();
+        StatusText.Text = $"Restored \"{removed.Video.Title}\".";
+    }
+
+    private void ClearUndo()
+    {
+        _removedVideo = null;
+        UndoButton.Visibility = Visibility.Collapsed;
     }
 
     private void ColumnHeader_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -171,6 +202,7 @@ public partial class MainWindow : Window
 
         var column = _dragCandidate;
         _dragCandidate = null;
+        ClearUndo();
         DragDrop.DoDragDrop((DependencyObject)sender, column, DragDropEffects.Move);
     }
 
@@ -208,6 +240,7 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: VideoItem video }) return;
 
         e.Handled = true;
+        ClearUndo();
         video.IsImportant = !video.IsImportant;
         if (video.IsImportant)
         {
@@ -226,6 +259,7 @@ public partial class MainWindow : Window
     {
         if (sender is not Button { Tag: VideoItem video }) return;
 
+        ClearUndo();
         video.IsNew = false;
 
         // Modal: control returns here when the video ends or the player is closed.
