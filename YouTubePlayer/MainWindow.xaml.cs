@@ -319,7 +319,8 @@ public partial class MainWindow : Window
 
     private void Video_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_videoDragCandidate is not { } candidate || e.LeftButton != MouseButtonState.Pressed) return;
+        if (_videoDragCandidate is not { } candidate || e.LeftButton != MouseButtonState.Pressed ||
+            sender is not Button { IsMouseCaptured: true } card || card.Tag != candidate.Video) return;
 
         var delta = e.GetPosition(this) - _videoDragStart;
         if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
