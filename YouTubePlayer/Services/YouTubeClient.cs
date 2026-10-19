@@ -23,14 +23,14 @@ public sealed class YouTubeClient
         if (_service is not null) return _service;
 
         var secretPath = Path.Combine(AppContext.BaseDirectory, "client_secret.json");
-        if (!File.Exists(secretPath))
-            throw new FileNotFoundException(
-                "client_secret.json was not found next to YouTubePlayer.exe. " +
-                "Create an OAuth 'Desktop app' client in Google Cloud Console (YouTube Data API v3 enabled) and save its JSON there.",
-                secretPath);
-
         GoogleClientSecrets secrets;
-        using (var stream = File.OpenRead(secretPath))
+        using (var stream = File.Exists(secretPath)
+            ? File.OpenRead(secretPath)
+            : typeof(YouTubeClient).Assembly.GetManifestResourceStream("YouTubePlayer.client_secret.json")
+                ?? throw new FileNotFoundException(
+                    "Google sign-in configuration was not bundled or found next to YouTubePlayer.exe. " +
+                    "Create an OAuth 'Desktop app' client in Google Cloud Console (YouTube Data API v3 enabled) and save its JSON as client_secret.json there.",
+                    secretPath))
             secrets = await GoogleClientSecrets.FromStreamAsync(stream, ct);
 
         var tokenDir = Path.Combine(
