@@ -51,6 +51,19 @@ public partial class MainWindow : Window
         StatusText.Text = "Click Sync to load your subscriptions.";
     }
 
+    private void HelpButton_Click(object sender, RoutedEventArgs e)
+    {
+        var instructions =
+            "\u00A9 Copyright 2026 Jesse Liberty\n\n" +
+            "\u2022 Double click to go to the video at last offset viewed\n" +
+            "\u2022 Single click to open details view\n" +
+            "\u2022 Right click on the card to toggle important ( ! ) and add to the important (first) column\n" +
+            "\u2022 Double click on the detail page to go to the video at your last offset.\n" +
+            "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.";
+
+        MessageBox.Show(this, instructions, "YouTube Player", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     private async void SyncButton_Click(object sender, RoutedEventArgs e)
     {
         ClearUndo();

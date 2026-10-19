@@ -33,6 +33,8 @@
     <DockPanel Grid.Column="0">
         <Border DockPanel.Dock="Top" Background="#202020" Padding="8">
             <StackPanel Orientation="Horizontal">
+                <Button x:Name="HelpButton" Content="Help" Width="100" Padding="4" Background="#FFD54F"
+                        Foreground="Black" Margin="0,0,8,0" Click="HelpButton_Click" />
                 <Button x:Name="SyncButton" Content="Sync" Width="100" Padding="4" Background="#4CAF50"
                         Foreground="Black" Click="SyncButton_Click" />
                 <Button x:Name="UndoButton" Content="Undo" Width="100" Padding="4" Margin="8,0,0,0"
