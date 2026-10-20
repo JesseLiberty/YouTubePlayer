@@ -65,6 +65,7 @@ public partial class MainWindow : Window
             "\u2022 Double click to go to the video at last offset viewed\n" +
             "\u2022 Single click to open details view\n" +
             "\u2022 Drag a card to reorder videos within its column\n" +
+            "\u2022 Drag a column header to reorder the columns (except first column)\n" +
             "\u2022 Right click on the card to toggle important ( ! ) and add to the important (first) column\n" +
             "\u2022 Double click on the detail page to go to the video at your last offset.\n" +
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.";
