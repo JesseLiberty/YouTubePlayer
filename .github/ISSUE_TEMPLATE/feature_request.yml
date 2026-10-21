@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement to the desktop or web app.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. Do not include credentials,
+        sign-in tokens, OAuth configuration, or personal app data.
+  - type: dropdown
+    id: app
+    attributes:
+      label: Target app
+      options:
+        - Desktop (WPF)
+        - Web (Blazor)
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case and who would benefit.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Describe how you would like the app to behave.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include any existing workarounds.
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional context
+      description: Add mockups or examples, with personal information removed.

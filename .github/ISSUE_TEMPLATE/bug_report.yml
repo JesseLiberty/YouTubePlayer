@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a problem with the desktop or web app.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues first. Do not include client_secret.json,
+        sign-in tokens, credentials, or personal app data. Redact logs and screenshots.
+        Do not report security vulnerabilities publicly; use GitHub's private
+        vulnerability reporting if enabled, or arrange a private channel with the maintainer.
+  - type: dropdown
+    id: app
+    attributes:
+      label: Affected app
+      options:
+        - Desktop (WPF)
+        - Web (Blazor)
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      description: Include the release version or commit hash and whether you built from source.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your Windows/OS version, browser and version for the web app, and .NET SDK version if building from source.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app...
+        2. Click...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional details
+      description: Add relevant error messages, redacted logs, or screenshots. Remove personal information first.
