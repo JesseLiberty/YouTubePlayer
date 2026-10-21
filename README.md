@@ -12,6 +12,20 @@ A player for syncing with and managing all of your YouTube subscriptions.
 * Drag and drop lists of videos to reorder
 * Drag and drop cards within list
 
+## Web Version (ASP.NET Core Blazor)
+
+`YouTubeWeb` is a Blazor Server port of the WPF app with the same look and behavior: single-click for details, double-click to play, right-click to toggle importance, ✕ to remove (with Undo), and drag and drop for columns (horizontal) and cards (vertical, within a column).
+
+```powershell
+dotnet run --project YouTubeWeb --launch-profile http
+```
+
+Then browse to `http://localhost:5013`.
+
+* It uses the same `client_secret.json` (from `YouTubePlayer/` or `YouTubeWeb/`) and shares sign-in tokens and video state with the WPF app in `%LOCALAPPDATA%\YouTubePlayer`.
+* Sign-in uses the Desktop OAuth loopback flow, so it opens a browser on the machine running the server. It's meant to run locally; hosting it for other users would require a Web application OAuth client and per-user storage.
+* Videos play in an in-page player window using the YouTube IFrame API. Videos whose owners disable embedding can't be played there.
+
 ## Standalone Windows Executable
 
 Publish a self-contained, single-file Windows x64 build:

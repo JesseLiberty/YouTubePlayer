@@ -1,0 +1,94 @@
+@* Modal replica of the Win32 MessageBox used by the WPF app. *@
+
+@if (_request is { } request)
+{
+    <div class="modal-blocker" @oncontextmenu:preventDefault>
+        <div class="message-box" role="dialog" aria-modal="true" aria-label="@request.Caption"
+             tabindex="-1" @onkeydown="OnKeyDown">
+            <div class="window-title-bar">
+                <span class="window-title">@request.Caption</span>
+                <button class="window-close" disabled="@(request.Buttons == MessageBoxButtons.YesNo)"
+                        title="Close" @onclick="() => Complete(MessageBoxResult.OK)">&#x2715;</button>
+            </div>
+            <div class="message-body">
+                <span class="message-icon">
+                    @switch (request.Icon)
+                    {
+                        case MessageBoxIcon.Error:
+                            <svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#C42B1C" /><path d="M11 11l10 10M21 11L11 21" stroke="#fff" stroke-width="2.4" stroke-linecap="round" /></svg>
+                            break;
+                        case MessageBoxIcon.Question:
+                            <svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#005FB8" /><text x="16" y="22.5" text-anchor="middle" font-family="Segoe UI" font-size="19" font-weight="600" fill="#fff">?</text></svg>
+                            break;
+                        default:
+                            <svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#005FB8" /><rect x="14.6" y="13.5" width="2.8" height="10" rx="1.2" fill="#fff" /><circle cx="16" cy="9.6" r="1.8" fill="#fff" /></svg>
+                            break;
+                    }
+                </span>
+                <div class="message-text">@request.Text</div>
+            </div>
+            <div class="message-buttons">
+                @if (request.Buttons == MessageBoxButtons.YesNo)
+                {
+                    <button class="dialog-button" @ref="_defaultButton" @onclick="() => Complete(MessageBoxResult.Yes)">Yes</button>
+                    <button class="dialog-button" @onclick="() => Complete(MessageBoxResult.No)">No</button>
+                }
+                else
+                {
+                    <button class="dialog-button" @ref="_defaultButton" @onclick="() => Complete(MessageBoxResult.OK)">OK</button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private Request? _request;
+    private ElementReference _defaultButton;
+    private bool _focusPending;
+
+    public Task<MessageBoxResult> ShowAsync(string text, string caption,
+        MessageBoxButtons buttons = MessageBoxButtons.OK, MessageBoxIcon icon = MessageBoxIcon.Information)
+    {
+        _request?.Completion.TrySetResult(MessageBoxResult.None);
+        _request = new Request(text, caption, buttons, icon,
+            new TaskCompletionSource<MessageBoxResult>(TaskCreationOptions.RunContinuationsAsynchronously));
+        _focusPending = true;
+        StateHasChanged();
+        return _request.Completion.Task;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusPending || _request is null) return;
+        _focusPending = false;
+        await _defaultButton.FocusAsync();
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (_request is not { } request) return;
+        switch (e.Key)
+        {
+            case "Escape" when request.Buttons == MessageBoxButtons.OK:
+                Complete(MessageBoxResult.OK);
+                break;
+            case "y" or "Y" when request.Buttons == MessageBoxButtons.YesNo:
+                Complete(MessageBoxResult.Yes);
+                break;
+            case "n" or "N" when request.Buttons == MessageBoxButtons.YesNo:
+                Complete(MessageBoxResult.No);
+                break;
+        }
+    }
+
+    private void Complete(MessageBoxResult result)
+    {
+        var request = _request;
+        _request = null;
+        request?.Completion.TrySetResult(result);
+    }
+
+    private sealed record Request(string Text, string Caption, MessageBoxButtons Buttons, MessageBoxIcon Icon,
+        TaskCompletionSource<MessageBoxResult> Completion);
+}

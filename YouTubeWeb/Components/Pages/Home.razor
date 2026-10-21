@@ -1,0 +1,105 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>YouTube Player - &#x00A9; 2026 Jesse Liberty</PageTitle>
+
+<div class="app-window" @oncontextmenu:preventDefault>
+    <div class="main-pane">
+        <div class="toolbar">
+            <button class="wpf-button toolbar-button help-button" @onclick="HelpButton_Click">Help</button>
+            <button class="wpf-button toolbar-button sync-button" disabled="@_syncing" @onclick="SyncButton_Click">Sync</button>
+            @if (_removedVideo is not null)
+            {
+                <button class="wpf-button toolbar-button undo-button" @onclick="UndoButton_Click">Undo</button>
+            }
+            <span class="status-text">@_statusText</span>
+        </div>
+
+        @* Horizontal scroll across columns; each column scrolls vertically on its own. *@
+        <div class="series-scroll">
+            @foreach (var column in AllColumns)
+            {
+                <div class="series-column" @key="column"
+                     data-column="@GetVideoOrderKey(column)"
+                     data-important="@(column.IsImportantColumn ? "true" : "false")"
+                     @ondrop="() => Column_Drop(column)">
+                    <div class="column-header @(column.IsImportantColumn ? null : "reorderable")"
+                         title="@(column.IsImportantColumn ? null : "Drag to reorder")"
+                         draggable="@(column.IsImportantColumn ? "false" : "true")"
+                         data-drag="column"
+                         @ondragstart="() => ColumnHeader_DragStart(column)"
+                         @ondragend="Drag_End">
+                        <span class="column-title"
+                              style="@(column.IsImportantColumn && column.Videos.Count == 0 ? "visibility:hidden" : null)">@column.Title</span>
+                        @if (!column.IsImportantColumn)
+                        {
+                            <button class="wpf-button unsubscribe-button" disabled="@_unsubscribing.Contains(column)"
+                                    @onclick="() => Unsubscribe_Click(column)">Unsubscribe</button>
+                        }
+                    </div>
+                    <div class="column-videos">
+                        @foreach (var video in column.Videos)
+                        {
+                            <div class="video-card" @key="video" title="Drag to reorder within this column"
+                                 draggable="true" data-drag="video"
+                                 @onclick="() => Video_Click(video)"
+                                 @ondblclick="() => Video_DoubleClick(video)"
+                                 @onmousedown="e => Video_MouseDown(e, video)"
+                                 @ondragstart="() => Video_DragStart(column, video)"
+                                 @ondragend="Drag_End"
+                                 @ondrop="() => Video_Drop(column, video)">
+                                <div class="card-content">
+                                    <div class="card-title">@video.Title</div>
+                                    <div class="card-meta">
+                                        <span class="date-length">@video.DateAndLength</span>
+                                        <span class="watch-mark" title="@video.WatchToolTip">@video.WatchMark</span>
+                                        <span class="important-mark" title="@(video.IsImportant ? "Important video" : null)">@video.ImportantMark</span>
+                                        <span class="new-mark" title="@(video.IsNew ? "New video" : null)">@video.NewMark</span>
+                                    </div>
+                                    <div class="card-description" data-word-ellipsis="@video.Description"></div>
+                                </div>
+                                <button class="wpf-button remove-button" title="Remove from list"
+                                        @onclick="() => RemoveVideo_Click(video)" @onclick:stopPropagation
+                                        @ondblclick:stopPropagation>&#x2715;</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="details-pane" @onmousedown="Details_MouseDown" @ondblclick="Details_DoubleClick">
+        @if (_selectedVideo is { } selected)
+        {
+            <div class="details-scroll">
+                <div class="details-title">@selected.Title</div>
+                <div class="details-meta">
+                    <span class="details-date">@selected.PublishedDate</span>
+                    <span class="details-new">@selected.NewMark</span>
+                    <span class="details-watch">@selected.WatchMark</span>
+                    <span class="details-playback">@selected.PlaybackTime</span>
+                    <span class="details-important">@selected.ImportantMark</span>
+                </div>
+                @foreach (var chapter in selected.Chapters)
+                {
+                    <button class="wpf-button chapter-button"
+                            @onclick="() => Chapter_Click(chapter)"
+                            @onmousedown="Chapter_MouseDown" @onmousedown:stopPropagation
+                            @ondblclick:stopPropagation>
+                        <span class="chapter-time">@chapter.Timestamp</span>
+                        <span class="chapter-title">@chapter.Title</span>
+                    </button>
+                }
+                <div class="details-description">@selected.DetailsDescription</div>
+            </div>
+        }
+        else
+        {
+            <div class="details-placeholder">Details about your video will appear here when you single-click on a video card.</div>
+        }
+    </div>
+</div>
+
+<PlayerWindow @ref="_player" />
+<MessageBox @ref="_messageBox" />
