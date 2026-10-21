@@ -1,0 +1,370 @@
+using System.Collections.ObjectModel;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using YouTubeWeb.Components.Shared;
+using YouTubeWeb.Models;
+using YouTubeWeb.Services;
+
+namespace YouTubeWeb.Components.Pages;
+
+public partial class Home
+{
+    private const string HiddenVideosFile = "hidden-videos.json";
+    private const string ColumnOrderFile = "column-order.json";
+    private const string VideoOrderFile = "video-order.json";
+    private const string ImportantColumnOrderKey = "__important__";
+    private const string WatchedVideosFile = "watched-videos.json";
+    private const string StartedVideosFile = "started-videos.json";
+    private const string KnownVideosFile = "known-videos.json";
+    private const string VideoPositionsFile = "video-positions.json";
+    private const string ImportantVideosFile = "important-videos.json";
+
+    [Inject] private YouTubeClient Client { get; set; } = default!;
+
+    private readonly ObservableCollection<SeriesColumn> _series = new();
+    private readonly SeriesColumn _importantColumn = new()
+    {
+        SubscriptionId = "",
+        ChannelId = "",
+        Title = "Important",
+        IsImportantColumn = true,
+    };
+    private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
+    private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
+    private readonly HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
+    private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
+    private readonly Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
+    private readonly HashSet<string> _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
+    private readonly Dictionary<string, List<string>> _videoOrder = LocalStore.Load<Dictionary<string, List<string>>>(VideoOrderFile) ?? [];
+    private readonly HashSet<SeriesColumn> _unsubscribing = [];
+
+    private PlayerWindow _player = default!;
+    private MessageBox _messageBox = default!;
+    private string _statusText = "Click Sync to load your subscriptions.";
+    private bool _syncing;
+    private VideoItem? _selectedVideo;
+    private SeriesColumn? _dragColumn;
+    private VideoDrag? _activeVideoDrag;
+    private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
+
+    private IEnumerable<SeriesColumn> AllColumns => _series.Prepend(_importantColumn);
+
+    private async Task HelpButton_Click()
+    {
+        var instructions =
+            "\u00A9 Copyright 2026 Jesse Liberty\n\n" +
+            "\u2022 Double click on a card (or the details page) to go to the video at last offset viewed\n" +
+            "\u2022 Single click to open details view\n" +
+            "\u2022 Drag a card to reorder videos within its column\n" +
+            "\u2022 Drag a column header to reorder the columns (except first column)\n" +
+            "\u2022 Right click on the card to toggle important ( ! ) and add to the important (first) column\n" +
+            "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.\n" +
+            "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
+            "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
+            "\u2022 Clicking the X on a card hides it from that column.\n" +
+            "\u2022 You can undo the last hide by clicking the undo button.\n";
+
+        await _messageBox.ShowAsync(instructions, "YouTube Player", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private async Task SyncButton_Click()
+    {
+        ClearUndo();
+        _syncing = true;
+        try
+        {
+            SetStatus("Signing in and loading subscriptions...");
+            var subscriptions = await Client.GetSubscriptionsAsync();
+
+            _series.Clear();
+            _importantColumn.Videos.Clear();
+            _selectedVideo = null;
+            var savedOrder = (LocalStore.Load<List<string>>(ColumnOrderFile) ?? [])
+                .Distinct()
+                .Select((channelId, index) => (channelId, index))
+                .ToDictionary(x => x.channelId, x => x.index);
+            // New subscriptions (not in the saved order) go at the end, still alphabetical.
+            foreach (var s in subscriptions.OrderBy(s => savedOrder.GetValueOrDefault(s.ChannelId, int.MaxValue)))
+                _series.Add(new SeriesColumn { SubscriptionId = s.SubscriptionId, ChannelId = s.ChannelId, Title = s.Title });
+
+            SetStatus($"Loading videos for {_series.Count} series...");
+            var uploads = await Client.GetUploadsPlaylistIdsAsync(_series.Select(c => c.ChannelId));
+
+            using var throttle = new SemaphoreSlim(6);
+            var loaded = 0;
+            // Continuations run on the circuit's dispatcher, so this is serialized like the WPF UI thread.
+            await Task.WhenAll(_series.ToList().Select(async column =>
+            {
+                if (!uploads.TryGetValue(column.ChannelId, out var playlistId)) return;
+                await throttle.WaitAsync();
+                try
+                {
+                    foreach (var video in await Client.GetVideosAsync(playlistId))
+                        if (!_hiddenVideoIds.Contains(video.VideoId))
+                        {
+                            video.WatchLevel = GetWatchLevel(video.VideoId);
+                            video.IsImportant = _importantVideoIds.Contains(video.VideoId);
+                            video.IsNew = !_knownVideoIds.Contains(video.VideoId);
+                            video.PositionSeconds = _videoPositions.GetValueOrDefault(video.VideoId);
+                            column.Videos.Add(video);
+                            if (video.IsImportant)
+                                _importantColumn.Videos.Add(video);
+                        }
+                }
+                finally
+                {
+                    throttle.Release();
+                    SetStatus($"Loaded {++loaded} of {_series.Count} series...");
+                }
+            }));
+
+            foreach (var column in _series.Append(_importantColumn))
+                RestoreVideoOrder(column);
+
+            _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
+            LocalStore.Save(KnownVideosFile, _knownVideoIds);
+            _statusText = $"Synced {_series.Count} series at {DateTime.Now:t}.";
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Sync failed.");
+            await _messageBox.ShowAsync(ex.Message, "Sync failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private void SetStatus(string text)
+    {
+        _statusText = text;
+        StateHasChanged();
+    }
+
+    private async Task Unsubscribe_Click(SeriesColumn column)
+    {
+        if (column.IsImportantColumn) return;
+
+        ClearUndo();
+        var answer = await _messageBox.ShowAsync($"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        _unsubscribing.Add(column);
+        StateHasChanged();
+        try
+        {
+            await Client.UnsubscribeAsync(column.SubscriptionId);
+            _series.Remove(column);
+            foreach (var video in column.Videos)
+                _importantColumn.Videos.Remove(video);
+            if (_selectedVideo is { } selected && column.Videos.Contains(selected))
+                _selectedVideo = null;
+            _statusText = $"Unsubscribed from {column.Title}.";
+        }
+        catch (Exception ex)
+        {
+            _unsubscribing.Remove(column);
+            await _messageBox.ShowAsync(ex.Message, "Unsubscribe failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void RemoveVideo_Click(VideoItem video)
+    {
+        ClearUndo();
+        var column = _series.FirstOrDefault(c => c.Videos.Contains(video));
+        if (column is null) return;
+
+        var index = column.Videos.IndexOf(video);
+        var importantIndex = _importantColumn.Videos.IndexOf(video);
+        column.Videos.RemoveAt(index);
+        _importantColumn.Videos.Remove(video);
+        if (ReferenceEquals(_selectedVideo, video))
+            _selectedVideo = null;
+        _hiddenVideoIds.Add(video.VideoId);
+        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        _removedVideo = (video, column, index, importantIndex);
+        _statusText = $"Removed \"{video.Title}\".";
+    }
+
+    private void UndoButton_Click()
+    {
+        if (_removedVideo is not { } removed) return;
+
+        _hiddenVideoIds.Remove(removed.Video.VideoId);
+        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        removed.Column.Videos.Insert(Math.Min(removed.Index, removed.Column.Videos.Count), removed.Video);
+        if (removed.ImportantIndex >= 0)
+            _importantColumn.Videos.Insert(
+                Math.Min(removed.ImportantIndex, _importantColumn.Videos.Count), removed.Video);
+        ClearUndo();
+        _statusText = $"Restored \"{removed.Video.Title}\".";
+    }
+
+    private void ClearUndo() => _removedVideo = null;
+
+    private void ColumnHeader_DragStart(SeriesColumn column)
+    {
+        if (column.IsImportantColumn) return;
+        _dragColumn = column;
+        _activeVideoDrag = null;
+        ClearUndo();
+    }
+
+    private void Column_Drop(SeriesColumn target)
+    {
+        if (_dragColumn is not { } source || source == target ||
+            source.IsImportantColumn || target.IsImportantColumn) return;
+
+        var oldIndex = _series.IndexOf(source);
+        var newIndex = _series.IndexOf(target);
+        if (oldIndex < 0 || newIndex < 0) return;
+
+        _series.Move(oldIndex, newIndex);
+        LocalStore.Save(ColumnOrderFile, _series.Select(c => c.ChannelId).ToList());
+        _statusText = $"Moved {source.Title}.";
+    }
+
+    private void Drag_End()
+    {
+        _dragColumn = null;
+        _activeVideoDrag = null;
+    }
+
+    private void Video_MouseDown(MouseEventArgs e, VideoItem video)
+    {
+        if (e.Button == 2)
+            ToggleImportance(video);
+    }
+
+    private void ToggleImportance(VideoItem video)
+    {
+        ClearUndo();
+        video.IsImportant = !video.IsImportant;
+        if (video.IsImportant)
+        {
+            _importantVideoIds.Add(video.VideoId);
+            _importantColumn.Videos.Add(video);
+        }
+        else
+        {
+            _importantVideoIds.Remove(video.VideoId);
+            _importantColumn.Videos.Remove(video);
+        }
+        LocalStore.Save(ImportantVideosFile, _importantVideoIds);
+    }
+
+    private void Video_Click(VideoItem video)
+    {
+        ClearUndo();
+        _selectedVideo = video;
+    }
+
+    private void Video_DragStart(SeriesColumn column, VideoItem video)
+    {
+        _dragColumn = null;
+        _activeVideoDrag = new VideoDrag(column, video);
+        ClearUndo();
+    }
+
+    private void Video_Drop(SeriesColumn column, VideoItem targetVideo)
+    {
+        if (_activeVideoDrag is not { } source || column != source.Column) return;
+
+        var oldIndex = column.Videos.IndexOf(source.Video);
+        var newIndex = column.Videos.IndexOf(targetVideo);
+        if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex) return;
+
+        column.Videos.Move(oldIndex, newIndex);
+        SaveVideoOrder(column);
+        _statusText = $"Moved \"{source.Video.Title}\".";
+    }
+
+    private void RestoreVideoOrder(SeriesColumn column)
+    {
+        var order = _videoOrder.GetValueOrDefault(GetVideoOrderKey(column)) ?? [];
+        var positions = order.Distinct()
+            .Select((videoId, index) => (videoId, index))
+            .ToDictionary(item => item.videoId, item => item.index);
+        var orderedVideos = column.Videos
+            .OrderBy(video => positions.GetValueOrDefault(video.VideoId, int.MaxValue))
+            .ToList();
+
+        column.Videos.Clear();
+        foreach (var video in orderedVideos)
+            column.Videos.Add(video);
+    }
+
+    private void SaveVideoOrder(SeriesColumn column)
+    {
+        _videoOrder[GetVideoOrderKey(column)] = column.Videos.Select(video => video.VideoId).ToList();
+        LocalStore.Save(VideoOrderFile, _videoOrder);
+    }
+
+    private static string GetVideoOrderKey(SeriesColumn column) =>
+        column.IsImportantColumn ? ImportantColumnOrderKey : column.ChannelId;
+
+    private sealed record VideoDrag(SeriesColumn Column, VideoItem Video);
+
+    private async Task Video_DoubleClick(VideoItem video)
+    {
+        _selectedVideo = video;
+        await PlayVideo(video, video.PositionSeconds);
+    }
+
+    private void Details_MouseDown(MouseEventArgs e)
+    {
+        if (_selectedVideo is not { } video) return;
+
+        if (e.Button == 2)
+            ToggleImportance(video);
+        else if (e.Button == 0)
+            ClearUndo();
+    }
+
+    private async Task Details_DoubleClick(MouseEventArgs e)
+    {
+        if (e.Button != 0 || _selectedVideo is not { } video) return;
+        await PlayVideo(video, video.PositionSeconds);
+    }
+
+    private void Chapter_MouseDown(MouseEventArgs e)
+    {
+        if (e.Button == 2 && _selectedVideo is { } video)
+            ToggleImportance(video);
+    }
+
+    private async Task Chapter_Click(VideoChapter chapter)
+    {
+        if (_selectedVideo is not { } video) return;
+        await PlayVideo(video, chapter.OffsetSeconds);
+    }
+
+    private async Task PlayVideo(VideoItem video, int startPositionSeconds)
+    {
+        ClearUndo();
+        video.IsNew = false;
+        StateHasChanged();
+
+        // Modal: control returns here when the video ends or the player is closed.
+        var result = await _player.PlayAsync(video.VideoId, video.Title, startPositionSeconds);
+
+        if (result.WatchLevel >= WatchLevel.Started && _startedVideoIds.Add(video.VideoId))
+            LocalStore.Save(StartedVideosFile, _startedVideoIds);
+        if (result.WatchLevel == WatchLevel.Watched && _watchedVideoIds.Add(video.VideoId))
+            LocalStore.Save(WatchedVideosFile, _watchedVideoIds);
+        if (result.PositionSeconds is int positionSeconds)
+        {
+            _videoPositions[video.VideoId] = positionSeconds;
+            LocalStore.Save(VideoPositionsFile, _videoPositions);
+            video.PositionSeconds = positionSeconds;
+        }
+        video.WatchLevel = GetWatchLevel(video.VideoId);
+    }
+
+    private WatchLevel GetWatchLevel(string videoId) =>
+        _watchedVideoIds.Contains(videoId) ? WatchLevel.Watched
+        : _startedVideoIds.Contains(videoId) ? WatchLevel.Started
+        : WatchLevel.None;
+}
