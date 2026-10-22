@@ -12,6 +12,10 @@
             {
                 <button class="wpf-button toolbar-button undo-button" @onclick="UndoButton_Click">Undo</button>
             }
+            <label class="search-label" for="video-search">Search:</label>
+            <input id="video-search" class="search-box" type="search" placeholder="Titles and summaries"
+                   aria-label="Search video titles and summaries"
+                   @bind="_searchText" @bind:event="oninput" />
             <span class="status-text">@_statusText</span>
         </div>
 
@@ -38,7 +42,7 @@
                         }
                     </div>
                     <div class="column-videos">
-                        @foreach (var video in column.Videos)
+                        @foreach (var video in column.Videos.Where(MatchesSearch))
                         {
                             <div class="video-card" @key="video" title="Drag to reorder within this column"
                                  draggable="true" data-drag="video"

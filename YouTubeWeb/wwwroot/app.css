@@ -99,6 +99,31 @@ html, body {
     margin-left: 8px;
 }
 
+.search-label {
+    flex: none;
+    color: #DDDDDD;
+    margin: 0 6px 0 16px;
+}
+
+.search-box {
+    flex: none;
+    width: 240px;
+    padding: 4px;
+    border: 1px solid #666666;
+    border-radius: 0;
+    background: #333333;
+    color: #fff;
+    font: inherit;
+    line-height: 1.33;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.search-box:focus {
+    outline: 1px solid #80CBC4;
+    outline-offset: 1px;
+}
+
 .status-text {
     color: #DDDDDD;
     margin-left: 12px;

@@ -22,6 +22,11 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSearchMatch}" Value="False">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
 
@@ -39,6 +44,10 @@
                         Foreground="Black" Click="SyncButton_Click" />
                 <Button x:Name="UndoButton" Content="Undo" Width="100" Padding="4" Margin="8,0,0,0"
                     Background="#FFD54F" Foreground="Black" Visibility="Collapsed" Click="UndoButton_Click" />
+                <TextBlock Text="Search:" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="16,0,6,0" />
+                <TextBox x:Name="SearchBox" Width="240" Padding="4" VerticalContentAlignment="Center"
+                         Background="#333333" Foreground="White" BorderBrush="#666666"
+                         ToolTip="Search video titles and summaries" TextChanged="SearchBox_TextChanged" />
                 <TextBlock x:Name="StatusText" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="12,0,0,0" />
             </StackPanel>
         </Border>

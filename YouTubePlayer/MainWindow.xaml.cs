@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private VideoDrag? _videoDragCandidate;
     private VideoDrag? _activeVideoDrag;
     private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
+    private string[] _searchTerms = [];
 
     public MainWindow()
     {
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.\n" +
             "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
+            "\u2022 Search video titles and summaries using one or more keywords.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n";
 
@@ -110,6 +112,7 @@ public partial class MainWindow : Window
                     foreach (var video in await _client.GetVideosAsync(playlistId))
                         if (!_hiddenVideoIds.Contains(video.VideoId))
                         {
+                            video.IsSearchMatch = MatchesSearch(video);
                             video.WatchLevel = GetWatchLevel(video.VideoId);
                             video.IsImportant = _importantVideoIds.Contains(video.VideoId);
                             video.IsNew = !_knownVideoIds.Contains(video.VideoId);
@@ -143,6 +146,19 @@ public partial class MainWindow : Window
             SyncButton.IsEnabled = true;
         }
     }
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _searchTerms = SearchBox.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var video in _series.SelectMany(column => column.Videos)
+                     .Concat(_importantColumn.Videos).Distinct())
+            video.IsSearchMatch = MatchesSearch(video);
+    }
+
+    private bool MatchesSearch(VideoItem video) =>
+        _searchTerms.Length == 0 || _searchTerms.All(term =>
+            video.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            video.Description.Contains(term, StringComparison.OrdinalIgnoreCase));
 
     private async void Unsubscribe_Click(object sender, RoutedEventArgs e)
     {

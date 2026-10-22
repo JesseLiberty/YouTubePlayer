@@ -41,6 +41,7 @@ public partial class Home
     private PlayerWindow _player = default!;
     private MessageBox _messageBox = default!;
     private string _statusText = "Click Sync to load your subscriptions.";
+    private string _searchText = "";
     private bool _syncing;
     private VideoItem? _selectedVideo;
     private SeriesColumn? _dragColumn;
@@ -48,6 +49,14 @@ public partial class Home
     private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
 
     private IEnumerable<SeriesColumn> AllColumns => _series.Prepend(_importantColumn);
+
+    private bool MatchesSearch(VideoItem video)
+    {
+        var terms = _searchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return terms.Length == 0 || terms.All(term =>
+            video.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            video.Description.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
 
     private async Task HelpButton_Click()
     {
@@ -61,6 +70,7 @@ public partial class Home
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.\n" +
             "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
+            "\u2022 Search video titles and summaries using one or more keywords.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n";
 

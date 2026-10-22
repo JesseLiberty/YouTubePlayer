@@ -18,6 +18,7 @@ public sealed class VideoItem : INotifyPropertyChanged
     private WatchLevel _watchLevel;
     private bool _isNew;
     private bool _isImportant;
+    private bool _isSearchMatch = true;
     private int _positionSeconds;
     private (IReadOnlyList<VideoChapter> Chapters, string Description)? _details;
 
@@ -96,6 +97,17 @@ public sealed class VideoItem : INotifyPropertyChanged
             _isImportant = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsImportant)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ImportantMark)));
+        }
+    }
+
+    public bool IsSearchMatch
+    {
+        get => _isSearchMatch;
+        set
+        {
+            if (_isSearchMatch == value) return;
+            _isSearchMatch = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSearchMatch)));
         }
     }
 
