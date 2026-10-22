@@ -6,6 +6,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 
 * Marks videos as started or completed
 * Displays your progress and total time for video, along with date and other meta-data
+* Search bar finds matching text in cards
 * Single click on card displays details
 * If details contain chapters, clicking on a chapter brings you there
 * Double-click on video and go to where you left off
