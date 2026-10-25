@@ -78,6 +78,19 @@ dotnet build YouTubeWeb\YouTubeWeb.csproj
 
 ## Before opening a pull request
 
+Run the dependency-free AI classification checks:
+
+```powershell
+dotnet run --project Tests\YouTubePlayer.Verification.csproj
+```
+
+To additionally exercise `gpt-5-mini` with six synthetic video examples, configure
+`OPENAI_API_KEY` and run the following (uses the paid OpenAI API):
+
+```powershell
+dotnet run --project Tests\YouTubePlayer.Verification.csproj -- --live
+```
+
 - Build the solution and run the app or apps affected by your change.
 - If behavior is shared, verify both the desktop and web versions or explain why the change applies to only one.
 - Keep changes focused and include a clear description of the problem and solution.

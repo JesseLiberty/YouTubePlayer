@@ -14,6 +14,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Delete videos from your list to avoid clutter
 * Drag and drop lists of videos to reorder
 * Drag and drop cards within list
+* Yellow AI labels identify videos semantically classified as about artificial intelligence by `gpt-5-mini`, with an estimated probability strictly greater than 80%
 
 ## Choose how to run
 
@@ -74,6 +75,25 @@ dotnet run --project YouTubeWeb --launch-profile http
 
 Then browse to `http://localhost:5013`.
 
+## AI video labels
+
+Both apps classify loaded, non-hidden videos during Sync using OpenAI's `gpt-5-mini`.
+Set the `OPENAI_API_KEY` environment variable before launching the app (the existing
+`OPENAI__APIKEY` and `OPENAI:APIKEY` names are also supported). API access and billing
+are required; a ChatGPT subscription alone does not provide API access.
+
+Video titles and descriptions are sent to OpenAI for semantic classification, not
+keyword matching. The yellow **AI** marker appears beside the watch check marks only
+when the model estimates a probability strictly above 0.80. Exactly 0.80 is not marked.
+These are model estimates based on metadata, not calibrated guarantees or analysis
+of the video's audio. The normal search box remains a keyword search.
+
+Results, including negative classifications, are cached in
+`%LOCALAPPDATA%\YouTubePlayer\ai-classification-gpt-5-mini-v1.json`, shared by both apps.
+Changed titles or descriptions are reclassified. Delete this cache to force a refresh.
+Sync shows classification progress. If classification fails, an error is displayed;
+loaded videos and any successfully classified batches remain available.
+
 ## Accounts, data, and limitations
 
 - **Local storage:** Both apps save tokens and video state in `%LOCALAPPDATA%\YouTubePlayer` on Windows. They share that storage when run under the same Windows account. Separate Windows users or computers have separate local data.
@@ -107,5 +127,4 @@ Be sure to subscribe to my youtube channel: https://youtube.com/jesseliberty
 ## License
 
 Copyright (c) 2026 Jesse Liberty. Licensed under the [MIT License](license.md).
-
 
