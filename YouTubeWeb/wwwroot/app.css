@@ -233,6 +233,7 @@ html, body {
     margin-left: 6px;
 }
 
+.ai-mark,
 .important-mark,
 .new-mark {
     color: #FFD54F;

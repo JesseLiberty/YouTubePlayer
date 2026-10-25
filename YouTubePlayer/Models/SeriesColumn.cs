@@ -18,6 +18,7 @@ public sealed class VideoItem : INotifyPropertyChanged
     private WatchLevel _watchLevel;
     private bool _isNew;
     private bool _isImportant;
+    private double? _aiProbability;
     private bool _isSearchMatch = true;
     private int _positionSeconds;
     private (IReadOnlyList<VideoChapter> Chapters, string Description)? _details;
@@ -111,6 +112,21 @@ public sealed class VideoItem : INotifyPropertyChanged
         }
     }
 
+    public double? AiProbability
+    {
+        get => _aiProbability;
+        set
+        {
+            if (value is { } probability && (!double.IsFinite(probability) || probability is < 0 or > 1))
+                throw new ArgumentOutOfRangeException(nameof(value));
+            if (_aiProbability == value) return;
+            _aiProbability = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AiProbability)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AiMark)));
+        }
+    }
+
+    public string AiMark => AiProbability > 0.8 ? "AI" : "";
     public string ImportantMark => IsImportant ? "!" : "";
 
     public string WatchMark => WatchLevel switch

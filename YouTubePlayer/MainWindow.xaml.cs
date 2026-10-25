@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using YouTubePlayer.Models;
 using YouTubePlayer.Services;
+using YouTube.Shared;
 
 namespace YouTubePlayer;
 
@@ -82,6 +83,7 @@ public partial class MainWindow : Window
     {
         ClearUndo();
         SyncButton.IsEnabled = false;
+        var classifying = false;
         try
         {
             StatusText.Text = "Signing in and loading subscriptions...";
@@ -134,12 +136,27 @@ public partial class MainWindow : Window
 
             _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             LocalStore.Save(KnownVideosFile, _knownVideoIds);
+            classifying = true;
+            StatusText.Text = "Classifying AI videos with gpt-5-mini...";
+            var videos = _series.SelectMany(column => column.Videos).DistinctBy(v => v.VideoId).ToArray();
+            var cache = LocalStore.Load<Dictionary<string, AiClassification>>(AiVideoClassifier.CacheFile) ?? [];
+            await new AiVideoClassifier().ClassifyAsync(
+                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)), cache,
+                results =>
+                {
+                    LocalStore.Save(AiVideoClassifier.CacheFile, cache);
+                    foreach (var video in videos)
+                        if (results.TryGetValue(video.VideoId, out var probability))
+                            video.AiProbability = probability;
+                    StatusText.Text = $"Classified {results.Count} of {videos.Length} videos for AI.";
+                });
             StatusText.Text = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
         catch (Exception ex)
         {
-            StatusText.Text = "Sync failed.";
-            MessageBox.Show(this, ex.Message, "Sync failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = classifying ? "Videos loaded; AI classification failed." : "Sync failed.";
+            MessageBox.Show(this, ex.Message, classifying ? "AI classification failed" : "Sync failed",
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

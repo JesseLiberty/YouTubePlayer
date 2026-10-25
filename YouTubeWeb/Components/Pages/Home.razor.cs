@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.Web;
 using YouTubeWeb.Components.Shared;
 using YouTubeWeb.Models;
 using YouTubeWeb.Services;
+using YouTube.Shared;
 
 namespace YouTubeWeb.Components.Pages;
 
@@ -81,6 +82,7 @@ public partial class Home
     {
         ClearUndo();
         _syncing = true;
+        var classifying = false;
         try
         {
             SetStatus("Signing in and loading subscriptions...");
@@ -133,12 +135,27 @@ public partial class Home
 
             _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             LocalStore.Save(KnownVideosFile, _knownVideoIds);
+            classifying = true;
+            SetStatus("Classifying AI videos with gpt-5-mini...");
+            var videos = _series.SelectMany(column => column.Videos).DistinctBy(v => v.VideoId).ToArray();
+            var cache = LocalStore.Load<Dictionary<string, AiClassification>>(AiVideoClassifier.CacheFile) ?? [];
+            await new AiVideoClassifier().ClassifyAsync(
+                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)), cache,
+                results =>
+                {
+                    LocalStore.Save(AiVideoClassifier.CacheFile, cache);
+                    foreach (var video in videos)
+                        if (results.TryGetValue(video.VideoId, out var probability))
+                            video.AiProbability = probability;
+                    SetStatus($"Classified {results.Count} of {videos.Length} videos for AI.");
+                });
             _statusText = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
         catch (Exception ex)
         {
-            SetStatus("Sync failed.");
-            await _messageBox.ShowAsync(ex.Message, "Sync failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            SetStatus(classifying ? "Videos loaded; AI classification failed." : "Sync failed.");
+            await _messageBox.ShowAsync(ex.Message, classifying ? "AI classification failed" : "Sync failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {

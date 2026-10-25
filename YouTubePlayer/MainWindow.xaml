@@ -130,6 +130,8 @@
                                                             <TextBlock Text="{Binding DateAndLength}" Foreground="#AAAAAA" FontSize="11" />
                                                             <TextBlock Text="{Binding WatchMark}" Foreground="#4CAF50" FontSize="11" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="{Binding WatchToolTip}" />
+                                                            <TextBlock Text="{Binding AiMark}" Foreground="#FFD54F" FontSize="11" FontWeight="Bold"
+                                                                       Margin="6,0,0,0" ToolTip="About AI (model-estimated probability above 80%)" />
                                                             <TextBlock Text="{Binding ImportantMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="Important video" />
                                                             <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
