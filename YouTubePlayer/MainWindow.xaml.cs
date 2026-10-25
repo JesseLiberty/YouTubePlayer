@@ -74,8 +74,10 @@ public partial class MainWindow : Window
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
             "\u2022 Search video titles and summaries using one or more keywords.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
-            "\u2022 You can undo the last hide by clicking the undo button.\n";
-
+            "\u2022 You can undo the last hide by clicking the undo button.\n" + 
+            "\u2022 An asterisk indicates a new entry.\n" +
+            "\u2022 One check indicates partially read while two checks indicate finished.\n"+
+            "\u2022 AI indicates a video having to do with artificial intelligence.\n";
         MessageBox.Show(this, instructions, "YouTube Player", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 

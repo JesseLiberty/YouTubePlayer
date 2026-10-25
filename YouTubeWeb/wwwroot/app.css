@@ -517,6 +517,18 @@ html, body {
         background-color: #606060;
     }
 
+.series-scroll::-webkit-scrollbar-thumb:horizontal {
+    background-color: #707070;
+}
+
+.series-scroll::-webkit-scrollbar-thumb:horizontal:hover {
+    background-color: #555555;
+}
+
+.series-scroll::-webkit-scrollbar-thumb:horizontal:active {
+    background-color: #404040;
+}
+
 ::-webkit-scrollbar-button:single-button {
     display: block;
     width: 17px;

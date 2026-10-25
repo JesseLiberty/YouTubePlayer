@@ -84,6 +84,12 @@ Run the dependency-free AI classification checks:
 dotnet run --project Tests\YouTubePlayer.Verification.csproj
 ```
 
+On Windows, verify that adding columns renders and scrolls the horizontal scrollbar:
+
+```powershell
+dotnet run --project Tests\Wpf\ScrollbarVerification.csproj
+```
+
 To additionally exercise `gpt-5-mini` with six synthetic video examples, configure
 `OPENAI_API_KEY` and run the following (uses the paid OpenAI API):
 

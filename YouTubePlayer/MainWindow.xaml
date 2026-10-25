@@ -5,6 +5,66 @@
         Title="YouTube Player - &#x00A9; 2026 Jesse Liberty" Height="850" Width="1400"
         WindowStartupLocation="CenterScreen" Background="#181818">
     <Window.Resources>
+        <Style TargetType="{x:Type ScrollBar}">
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type ScrollBar}">
+                                <Grid Background="#F0F0F0" Height="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarHeightKey}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <RepeatButton Width="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarButtonWidthKey}}"
+                                                  Command="{x:Static ScrollBar.LineLeftCommand}" Content="&#x25C0;" FontSize="9" Padding="0" Focusable="False" />
+                                    <Track x:Name="PART_Track" Grid.Column="1" Orientation="Horizontal">
+                                        <Track.Resources>
+                                            <Style TargetType="{x:Type RepeatButton}">
+                                                <Setter Property="Focusable" Value="False" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                                            <Border Background="Transparent" />
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </Track.Resources>
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="{x:Static ScrollBar.PageLeftCommand}" />
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb MinWidth="17">
+                                                <Thumb.Template>
+                                                    <ControlTemplate TargetType="{x:Type Thumb}">
+                                                        <Border x:Name="ThumbBorder" Background="#707070" />
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="ThumbBorder" Property="Background" Value="#555555" />
+                                                            </Trigger>
+                                                            <Trigger Property="IsDragging" Value="True">
+                                                                <Setter TargetName="ThumbBorder" Property="Background" Value="#404040" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Thumb.Template>
+                                            </Thumb>
+                                        </Track.Thumb>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="{x:Static ScrollBar.PageRightCommand}" />
+                                        </Track.IncreaseRepeatButton>
+                                    </Track>
+                                    <RepeatButton Grid.Column="2" Width="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarButtonWidthKey}}"
+                                                  Command="{x:Static ScrollBar.LineRightCommand}" Content="&#x25B6;" FontSize="9" Padding="0" Focusable="False" />
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="VideoCardStyle" TargetType="Button">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
