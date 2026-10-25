@@ -5,6 +5,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 ## Features
 
 * Marks videos as started or completed
+* Loads up to 25 recent videos per subscribed channel on Sync
 * Displays your progress and total time for video, along with date and other meta-data
 * Search bar finds matching text in cards
 * Single click on card displays details
@@ -127,4 +128,3 @@ Be sure to subscribe to my youtube channel: https://youtube.com/jesseliberty
 ## License
 
 Copyright (c) 2026 Jesse Liberty. Licensed under the [MIT License](license.md).
-

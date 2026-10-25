@@ -15,7 +15,7 @@ public sealed record Subscription(string SubscriptionId, string ChannelId, strin
 
 public sealed class YouTubeClient
 {
-    private const int VideosPerSeries = 50;
+    private const int VideosPerSeries = 25;
     private YouTubeService? _service;
 
     private async Task<YouTubeService> GetServiceAsync(CancellationToken ct)

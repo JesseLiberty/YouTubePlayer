@@ -15,7 +15,7 @@ public sealed record Subscription(string SubscriptionId, string ChannelId, strin
 
 public sealed class YouTubeClient
 {
-    private const int VideosPerSeries = 50;
+    private const int VideosPerSeries = 25;
     private readonly SemaphoreSlim _signInLock = new(1, 1);
     private YouTubeService? _service;
 
