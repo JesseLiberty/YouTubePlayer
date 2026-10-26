@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/YouTubePlayer.Verification.csproj" />
+  </Folder>
   <Project Path="YouTubePlayer/YouTubePlayer.csproj" />
   <Project Path="YouTubeWeb/YouTubeWeb.csproj" />
 </Solution>

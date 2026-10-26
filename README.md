@@ -20,7 +20,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 ## Choose how to run
 
 | Option | Requirements | Best for |
-|---|---|---|
+| --- | --- | --- |
 | Standalone desktop executable | Windows x64, Microsoft Edge WebView2 Runtime, internet connection | Using the app without installing development tools |
 | Desktop from source | Windows, .NET 10 SDK, WebView2 Runtime, internet connection | Contributing to the WPF app |
 | Web from source | .NET 10 SDK, modern browser, internet connection | Running the web app locally or contributing to Blazor |
@@ -116,11 +116,11 @@ fallback, which may incur API charges. OpenAI credentials are never sent to the 
 
 ## Accounts, data, and limitations
 
-- **Local storage:** Both apps save tokens and video state in `%LOCALAPPDATA%\YouTubePlayer` on Windows. They share that storage when run under the same Windows account. Separate Windows users or computers have separate local data.
-- **YouTube account changes:** Unsubscribing changes the subscriptions of the Google/YouTube account currently signed in. The apps request YouTube permissions that allow subscription management.
-- **Local-only web sign-in:** The web app uses Desktop OAuth and opens a sign-in browser on the machine running the server. It is not a multi-user hosted service. Hosting it for independent users requires Web application OAuth and per-user authentication and storage.
-- **Embedded playback:** The web app uses the YouTube IFrame API. Videos whose owners disable embedding cannot play in its embedded player.
-- **Google restrictions:** API quotas and OAuth testing restrictions apply. Broader distribution may require Google verification.
+* **Local storage:** Both apps save tokens and video state in `%LOCALAPPDATA%\YouTubePlayer` on Windows. They share that storage when run under the same Windows account. Separate Windows users or computers have separate local data.
+* **YouTube account changes:** Unsubscribing changes the subscriptions of the Google/YouTube account currently signed in. The apps request YouTube permissions that allow subscription management.
+* **Local-only web sign-in:** The web app uses Desktop OAuth and opens a sign-in browser on the machine running the server. It is not a multi-user hosted service. Hosting it for independent users requires Web application OAuth and per-user authentication and storage.
+* **Embedded playback:** The web app uses the YouTube IFrame API. Videos whose owners disable embedding cannot play in its embedded player.
+* **Google restrictions:** API quotas and OAuth testing restrictions apply. Broader distribution may require Google verification.
 
 ## Publish a standalone desktop executable
 
@@ -142,7 +142,7 @@ Use [GitHub Issues](https://github.com/JesseLiberty/YouTubePlayer/issues) to rep
 
 ## Shameless Self-promotion
 
-Be sure to subscribe to my youtube channel: https://youtube.com/jesseliberty
+Be sure to subscribe to [my YouTube channel](https://youtube.com/jesseliberty).
 
 ## License
 
