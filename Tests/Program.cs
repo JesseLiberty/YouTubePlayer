@@ -4,16 +4,18 @@ using YouTube.Shared;
 using DesktopVideo = YouTubePlayer.Models.VideoItem;
 using WebVideo = YouTubeWeb.Models.VideoItem;
 
-if (args.Contains("--live"))
+if (args.Contains("--live") || args.Contains("--live-local"))
 {
-    await VerifyLiveAsync();
+    await VerifyLiveAsync(args.Contains("--live-local"));
     return;
 }
 
 VerifyMarkers();
 await VerifyCacheAndBatchesAsync();
 await VerifyInvalidResponsesAsync();
-Console.WriteLine("PASS: marker thresholds, notifications, batching, cache invalidation, and response/error validation.");
+await VerifyLocalAndFallbackAsync();
+await VerifyProgressiveLocalAsync();
+Console.WriteLine("PASS: thresholds, caching, batching, response validation, local discovery, and consent-gated fallback/exit.");
 
 static void Assert(bool condition, string message)
 {
@@ -144,7 +146,169 @@ static async Task VerifyInvalidResponsesAsync()
     catch (OperationCanceledException) { }
 }
 
-static async Task VerifyLiveAsync()
+static async Task VerifyLocalAndFallbackAsync()
+{
+    const string model = "Qwen3.8-Flash-Next-test.gguf";
+    var localCalls = 0;
+    var failInference = false;
+    using var localHttp = new HttpClient(new NetworkHandler(async request =>
+    {
+        Assert(request.Headers.Authorization is null, "OpenAI credentials leaked to local server.");
+        if (request.Method == HttpMethod.Get)
+            return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { data = new[] { new { id = model } } })) };
+        localCalls++;
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+        Assert(body.RootElement.GetProperty("model").GetString() == model, "Discovered model ID was not used.");
+        Assert(!body.RootElement.TryGetProperty("reasoning_effort", out _), "Cloud-only setting sent locally.");
+        Assert(body.RootElement.GetProperty("max_tokens").GetInt32() == 4096, "Local output limit missing.");
+        return failInference ? new(HttpStatusCode.ServiceUnavailable) :
+            Reply(new[] { new { videoId = "one", probability = 0.95 } });
+    }));
+    var local = await AiVideoClassifier.CreateLocalAsync(localHttp);
+    var cloudCalls = 0;
+    using var cloudHttp = new HttpClient(new FakeHandler(_ =>
+    {
+        cloudCalls++;
+        return Reply(new[] { new { videoId = "one", probability = 0.1 } });
+    }));
+    VideoClassificationInput[] videos = [new("one", "Title", "Description")];
+    var caches = new Dictionary<string, Dictionary<string, AiClassification>>();
+    Dictionary<string, AiClassification> Load(string file) =>
+        caches.TryGetValue(file, out var cache) ? cache : [];
+    void Save(string file, Dictionary<string, AiClassification> cache) => caches[file] = cache;
+    var prompts = 0;
+    var allowCloud = false;
+    Task<bool> Confirm(string error)
+    {
+        Assert(!string.IsNullOrWhiteSpace(error), "Failure reason missing.");
+        prompts++;
+        return Task.FromResult(allowCloud);
+    }
+    AiVideoClassifier Cloud() => new(cloudHttp, "test-key");
+    var completed = await AiVideoClassifier.ClassifyPreferLocalAsync(videos, Load, Save, (_, _) => { },
+        Confirm, () => Task.FromResult(local), Cloud);
+    Assert(completed && localCalls == 1 && prompts == 0 && cloudCalls == 0, "Healthy local path used cloud.");
+    Assert(local.CacheFileName != AiVideoClassifier.CacheFile, "Provider caches overlap.");
+
+    async Task<AiVideoClassifier> Unavailable()
+    {
+        using var unavailable = new HttpClient(new NetworkHandler(_ => throw new HttpRequestException("Connection refused")));
+        return await AiVideoClassifier.CreateLocalAsync(unavailable);
+    }
+    completed = await AiVideoClassifier.ClassifyPreferLocalAsync(videos, Load, Save, (_, _) => { },
+        Confirm, Unavailable, Cloud);
+    Assert(!completed && prompts == 1 && cloudCalls == 0, "Exit branch contacted cloud.");
+    allowCloud = true;
+    completed = await AiVideoClassifier.ClassifyPreferLocalAsync(videos, Load, Save, (_, _) => { },
+        Confirm, Unavailable, Cloud);
+    Assert(completed && prompts == 2 && cloudCalls == 1, "Approved cloud fallback failed.");
+    Assert(caches[local.CacheFileName]["one"].Probability == 0.95 &&
+        caches[AiVideoClassifier.CacheFile]["one"].Probability == 0.1, "Provider caches contaminated.");
+
+    foreach (var body in new[] { "{\"data\":[]}", "not json", "{\"data\":[{\"id\":\"unrelated-model\"}]}" })
+    {
+        using var invalid = new HttpClient(new NetworkHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) })));
+        try
+        {
+            await AiVideoClassifier.CreateLocalAsync(invalid);
+            throw new Exception("Missing/invalid model discovery was accepted.");
+        }
+        catch (LocalModelUnavailableException) { }
+    }
+    failInference = true;
+    caches.Clear();
+    allowCloud = false;
+    completed = await AiVideoClassifier.ClassifyPreferLocalAsync(videos, Load, Save, (_, _) => { },
+        Confirm, () => Task.FromResult(local), Cloud);
+    Assert(!completed && prompts == 3 && cloudCalls == 1, "Mid-inference failure bypassed consent.");
+
+    // Storage/UI errors must not be misreported as a local-model outage.
+    try
+    {
+        await AiVideoClassifier.ClassifyPreferLocalAsync(videos, _ => throw new IOException("Disk failure"),
+            Save, (_, _) => { }, Confirm, () => Task.FromResult(local), Cloud);
+        throw new Exception("Storage error was ignored.");
+    }
+    catch (IOException) { }
+    Assert(prompts == 3, "Storage error triggered a model fallback.");
+
+    using var brokenOutput = new HttpClient(new NetworkHandler(request => Task.FromResult(
+        new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(request.Method == HttpMethod.Get
+                ? JsonSerializer.Serialize(new { data = new[] { new { id = model } } })
+                : "{\"choices\":[]}")
+        })));
+    var broken = await AiVideoClassifier.CreateLocalAsync(brokenOutput);
+    caches.Clear();
+    completed = await AiVideoClassifier.ClassifyPreferLocalAsync(videos, Load, Save, (_, _) => { },
+        Confirm, () => Task.FromResult(broken), Cloud);
+    Assert(!completed && prompts == 4 && cloudCalls == 1, "Malformed local output bypassed the fallback dialog.");
+
+    using var timedOut = new HttpClient(new NetworkHandler(_ =>
+        throw new TaskCanceledException("Simulated timeout")));
+    try
+    {
+        await AiVideoClassifier.CreateLocalAsync(timedOut);
+        throw new Exception("Discovery timeout was ignored.");
+    }
+    catch (LocalModelUnavailableException) { }
+}
+
+static async Task VerifyProgressiveLocalAsync()
+{
+    var releaseSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    using var http = new HttpClient(new NetworkHandler(async request =>
+    {
+        if (request.Method == HttpMethod.Get)
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":[{\"id\":\"Qwen3.8-Flash-Next-test\"}]}")
+            };
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+        using var metadata = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        Assert(metadata.RootElement.GetArrayLength() == 1, "Local inference must classify one video at a time.");
+        var id = metadata.RootElement[0].GetProperty("VideoId").GetString()!;
+        if (id == "second")
+        {
+            secondStarted.SetResult();
+            await releaseSecond.Task;
+        }
+        return Reply(new[] { new { videoId = id, probability = 0.95 } });
+    }));
+    var classifier = await AiVideoClassifier.CreateLocalAsync(http);
+    var cache = new Dictionary<string, AiClassification>();
+    var counts = new List<int>();
+    var desktop = new DesktopVideo { VideoId = "first", Title = "First" };
+    var web = new WebVideo { VideoId = "first", Title = "First" };
+    var classification = classifier.ClassifyAsync(
+        [new("first", "First", ""), new("second", "Second", "")], cache,
+        results =>
+        {
+            counts.Add(results.Count);
+            if (results.TryGetValue("first", out var probability))
+                desktop.AiProbability = web.AiProbability = probability;
+        });
+    try
+    {
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(!classification.IsCompleted, "Classification did not remain asynchronous.");
+        Assert(counts.SequenceEqual(new[] { 0, 1 }), "First result was not published before the second finished.");
+        Assert(cache.Count == 1 && desktop.AiMark == "AI" && web.AiMark == "AI",
+            "First result was not cached and displayed progressively.");
+    }
+    finally
+    {
+        releaseSecond.TrySetResult();
+        await classification;
+    }
+    Assert(counts.SequenceEqual(new[] { 0, 1, 2 }), "Final progressive result was not published.");
+    Console.WriteLine("PASS: local AI labels update before remaining inference completes.");
+}
+
+static async Task VerifyLiveAsync(bool localModel)
 {
     VideoClassificationInput[] samples =
     [
@@ -163,14 +327,21 @@ static async Task VerifyLiveAsync()
         ["acronym"] = false, ["incidental"] = false, ["injection"] = false
     };
     var cache = new Dictionary<string, AiClassification>();
-    await new AiVideoClassifier().ClassifyAsync(samples, cache, _ => { });
+    var classifier = localModel ? await AiVideoClassifier.CreateLocalAsync() : new AiVideoClassifier();
+    await classifier.ClassifyAsync(samples, cache, _ => { });
     foreach (var sample in samples)
     {
         var probability = cache[sample.VideoId].Probability;
         Console.WriteLine($"{sample.VideoId}: {probability:P1}, mark={probability > 0.8}");
         Assert((probability > 0.8) == expected[sample.VideoId], $"Unexpected semantic result: {sample.VideoId}");
     }
-    Console.WriteLine("PASS: live gpt-5-mini semantic classification of six synthetic videos.");
+    Console.WriteLine($"PASS: live {classifier.DisplayName} semantic classification of six synthetic videos.");
+}
+
+sealed class NetworkHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+        respond(request);
 }
 
 sealed class FakeHandler(Func<JsonElement, HttpResponseMessage> respond) : HttpMessageHandler

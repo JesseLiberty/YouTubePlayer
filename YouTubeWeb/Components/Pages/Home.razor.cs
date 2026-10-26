@@ -139,19 +139,31 @@ public partial class Home
             _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             LocalStore.Save(KnownVideosFile, _knownVideoIds);
             classifying = true;
-            SetStatus("Classifying AI videos with gpt-5-mini...");
+            SetStatus("Connecting to the local AI model...");
             var videos = _series.SelectMany(column => column.Videos).DistinctBy(v => v.VideoId).ToArray();
-            var cache = LocalStore.Load<Dictionary<string, AiClassification>>(AiVideoClassifier.CacheFile) ?? [];
-            await new AiVideoClassifier().ClassifyAsync(
-                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)), cache,
-                results =>
+            var completed = await AiVideoClassifier.ClassifyPreferLocalAsync(
+                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)),
+                file => LocalStore.Load<Dictionary<string, AiClassification>>(file) ?? [],
+                (file, cache) => LocalStore.Save(file, cache),
+                (model, results) =>
                 {
-                    LocalStore.Save(AiVideoClassifier.CacheFile, cache);
                     foreach (var video in videos)
-                        if (results.TryGetValue(video.VideoId, out var probability))
-                            video.AiProbability = probability;
-                    SetStatus($"Classified {results.Count} of {videos.Length} videos for AI.");
+                        video.AiProbability = results.TryGetValue(video.VideoId, out var probability) ? probability : null;
+                    SetStatus($"{model}: classified {results.Count} of {videos.Length} videos for AI.");
+                },
+                async error =>
+                {
+                    var answer = await _messageBox.ShowAsync(
+                        $"{error}\n\nUse gpt-5-mini through OpenAI instead? This sends video titles and descriptions " +
+                        "to OpenAI and may incur API charges.\n\nYes: use gpt-5-mini for this Sync.\nNo: exit this Sync and keep loaded videos.",
+                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    return answer == MessageBoxResult.Yes;
                 });
+            if (!completed)
+            {
+                SetStatus("Sync stopped. Loaded videos have been kept.");
+                return;
+            }
             _statusText = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
         catch (Exception ex)

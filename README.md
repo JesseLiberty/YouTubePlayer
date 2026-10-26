@@ -15,7 +15,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Delete videos from your list to avoid clutter
 * Drag and drop lists of videos to reorder
 * Drag and drop cards within list
-* Yellow AI labels identify videos semantically classified as about artificial intelligence by `gpt-5-mini`, with an estimated probability strictly greater than 80%
+* Yellow AI labels identify videos semantically classified as about artificial intelligence by the local network model, with an estimated probability strictly greater than 80%
 
 ## Choose how to run
 
@@ -78,22 +78,35 @@ Then browse to `http://localhost:5013`.
 
 ## AI video labels
 
-Both apps classify loaded, non-hidden videos during Sync using OpenAI's `gpt-5-mini`.
-Set the `OPENAI_API_KEY` environment variable before launching the app (the existing
-`OPENAI__APIKEY` and `OPENAI:APIKEY` names are also supported). API access and billing
-are required; a ChatGPT subscription alone does not provide API access.
+Both apps classify loaded, non-hidden videos during Sync using the Qwen3.8-Flash-Next
+model served by llama.cpp at `http://192.168.1.151:11434`. The app discovers its full
+model ID using `/v1/models` and calls `/v1/chat/completions`. This is a Qwen model
+running on a llama.cpp server, not a Meta Llama model. Keep the server available on
+your trusted LAN; this HTTP endpoint is unencrypted and must not be exposed publicly.
 
-Video titles and descriptions are sent to OpenAI for semantic classification, not
+Local classification runs asynchronously, one video per request. Cached labels appear
+immediately; each newly classified card updates as its result arrives, without waiting
+for the remaining videos. The UI stays usable while classification continues.
+
+If the server cannot be reached, the expected model is not loaded, or inference fails,
+a dialog offers **Yes** to use OpenAI's `gpt-5-mini` for that Sync, or **No** to exit.
+No closes the desktop app gracefully; in the web app it stops Sync and keeps loaded
+videos without shutting down the server. Cloud fallback is never automatic.
+For cloud fallback, set `OPENAI_API_KEY` before launching the app (`OPENAI__APIKEY`
+and `OPENAI:APIKEY` are also supported). OpenAI API billing is separate from ChatGPT.
+
+Video titles and descriptions are sent to the local server for semantic classification, not
 keyword matching. The yellow **AI** marker appears beside the watch check marks only
 when the model estimates a probability strictly above 0.80. Exactly 0.80 is not marked.
 These are model estimates based on metadata, not calibrated guarantees or analysis
 of the video's audio. The normal search box remains a keyword search.
 
-Results, including negative classifications, are cached in
-`%LOCALAPPDATA%\YouTubePlayer\ai-classification-gpt-5-mini-v1.json`, shared by both apps.
-Changed titles or descriptions are reclassified. Delete this cache to force a refresh.
-Sync shows classification progress. If classification fails, an error is displayed;
-loaded videos and any successfully classified batches remain available.
+Results, including negative classifications, are cached under `%LOCALAPPDATA%\YouTubePlayer`,
+shared by both apps. Local results use `ai-classification-local-qwen-v1.json`;
+approved cloud fallback uses `ai-classification-gpt-5-mini-v1.json`. Cache fingerprints
+include model, endpoint, title, and description. Delete the corresponding cache to force
+a refresh. Sync displays model and progress. OpenAI receives metadata only if you approve
+fallback, which may incur API charges. OpenAI credentials are never sent to the local server.
 
 ## Accounts, data, and limitations
 

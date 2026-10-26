@@ -10,6 +10,7 @@ namespace YouTube.Shared;
 
 public sealed record VideoClassificationInput(string VideoId, string Title, string Description);
 public sealed record AiClassification(string Fingerprint, double Probability);
+public sealed class LocalModelUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
 
 public sealed class AiVideoClassifier
 {
@@ -18,6 +19,11 @@ public sealed class AiVideoClassifier
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly HttpClient _client;
     private readonly string? _apiKey;
+    private readonly string _model = Model;
+    private readonly string _endpoint = "https://api.openai.com/v1/chat/completions";
+    private readonly bool _local;
+    public string DisplayName => _local ? "local Qwen3.8-Flash-Next" : Model;
+    public string CacheFileName => _local ? "ai-classification-local-qwen-v1.json" : CacheFile;
 
     public AiVideoClassifier() : this(Client, null) { }
 
@@ -26,6 +32,86 @@ public sealed class AiVideoClassifier
         _client = client;
         _apiKey = apiKey;
     }
+
+    private AiVideoClassifier(HttpClient client, string model, bool local) : this(client, null)
+    {
+        _model = model;
+        _local = local;
+        _endpoint = "http://192.168.1.151:11434/v1/chat/completions";
+    }
+
+    public static Task<AiVideoClassifier> CreateLocalAsync(CancellationToken ct = default) =>
+        CreateLocalAsync(Client, ct);
+
+    internal static async Task<AiVideoClassifier> CreateLocalAsync(HttpClient client, CancellationToken ct = default)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            using var response = await client.GetAsync("http://192.168.1.151:11434/v1/models", timeout.Token);
+            response.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
+            var model = document.RootElement.GetProperty("data").EnumerateArray()
+                .Select(item => item.GetProperty("id").GetString())
+                .FirstOrDefault(id => id is not null && id.Contains("Qwen3.8-Flash-Next", StringComparison.OrdinalIgnoreCase));
+            if (model is null)
+                throw new InvalidDataException("The expected Qwen3.8-Flash-Next model is not loaded.");
+            return new AiVideoClassifier(client, model, true);
+        }
+        catch (Exception ex) when (IsModelFailure(ex) && !ct.IsCancellationRequested)
+        {
+            throw new LocalModelUnavailableException(
+                $"The local model at 192.168.1.151:11434 is unavailable. {ex.Message}", ex);
+        }
+    }
+
+    public static Task<bool> ClassifyPreferLocalAsync(
+        IEnumerable<VideoClassificationInput> videos,
+        Func<string, Dictionary<string, AiClassification>> loadCache,
+        Action<string, Dictionary<string, AiClassification>> saveCache,
+        Action<string, IReadOnlyDictionary<string, double>> onUpdated,
+        Func<string, Task<bool>> confirmCloud) =>
+        ClassifyPreferLocalAsync(videos, loadCache, saveCache, onUpdated, confirmCloud,
+            () => CreateLocalAsync(), () => new AiVideoClassifier());
+
+    internal static async Task<bool> ClassifyPreferLocalAsync(
+        IEnumerable<VideoClassificationInput> videos,
+        Func<string, Dictionary<string, AiClassification>> loadCache,
+        Action<string, Dictionary<string, AiClassification>> saveCache,
+        Action<string, IReadOnlyDictionary<string, double>> onUpdated,
+        Func<string, Task<bool>> confirmCloud,
+        Func<Task<AiVideoClassifier>> createLocal,
+        Func<AiVideoClassifier> createCloud)
+    {
+        var inputs = videos.ToArray();
+        async Task RunAsync(AiVideoClassifier classifier)
+        {
+            var cache = loadCache(classifier.CacheFileName);
+            await classifier.ClassifyAsync(inputs, cache, results =>
+            {
+                saveCache(classifier.CacheFileName, cache);
+                onUpdated(classifier.DisplayName, results);
+            });
+        }
+
+        try
+        {
+            await RunAsync(await createLocal());
+            return true;
+        }
+        catch (LocalModelUnavailableException ex)
+        {
+            if (!await confirmCloud(ex.Message)) return false;
+        }
+        await RunAsync(createCloud());
+        return true;
+    }
+
+    private static bool IsModelFailure(Exception ex) =>
+        ex is HttpRequestException or OperationCanceledException or JsonException or
+            InvalidDataException or KeyNotFoundException or InvalidOperationException or
+            ArgumentOutOfRangeException or IndexOutOfRangeException or FormatException;
 
     public async Task ClassifyAsync(
         IEnumerable<VideoClassificationInput> videos,
@@ -44,10 +130,19 @@ public sealed class AiVideoClassifier
                 results.Add(video.VideoId, saved.Probability);
         onUpdated(results);
 
-        foreach (var batch in inputs.Where(v => !results.ContainsKey(v.VideoId)).Chunk(20))
+        foreach (var batch in inputs.Where(v => !results.ContainsKey(v.VideoId)).Chunk(_local ? 1 : 20))
         {
             ct.ThrowIfCancellationRequested();
-            var probabilities = await ClassifyBatchAsync(batch, ct);
+            Dictionary<string, double> probabilities;
+            try
+            {
+                probabilities = await ClassifyBatchAsync(batch, ct);
+            }
+            catch (Exception ex) when (_local && IsModelFailure(ex) && !ct.IsCancellationRequested)
+            {
+                throw new LocalModelUnavailableException(
+                    $"The local model could not classify videos. {ex.Message}", ex);
+            }
             foreach (var (id, probability) in probabilities)
             {
                 cache[id] = new AiClassification(fingerprints[id], probability);
@@ -57,9 +152,9 @@ public sealed class AiVideoClassifier
         }
     }
 
-    private static string Fingerprint(VideoClassificationInput input) =>
+    private string Fingerprint(VideoClassificationInput input) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(new { Model, Version = 1, input.Title, input.Description }))));
+            JsonSerializer.Serialize(new { Model = _model, Endpoint = _endpoint, Version = 1, input.Title, input.Description }))));
 
     private async Task<Dictionary<string, double>> ClassifyBatchAsync(
         VideoClassificationInput[] batch, CancellationToken ct)
@@ -67,17 +162,16 @@ public sealed class AiVideoClassifier
         var key = _apiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")
             ?? Environment.GetEnvironmentVariable("OPENAI__APIKEY")
             ?? Environment.GetEnvironmentVariable("OPENAI:APIKEY");
-        if (string.IsNullOrWhiteSpace(key))
+        if (!_local && string.IsNullOrWhiteSpace(key))
             throw new InvalidOperationException(
                 "AI classification requires an OpenAI API key. Set OPENAI_API_KEY and restart the app.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Content = JsonContent.Create(new
+        using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
+        if (!_local)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        var payload = new
         {
-            model = Model,
-            reasoning_effort = "low",
-            max_completion_tokens = 4096,
+            model = _model,
             messages = new[]
             {
                 new
@@ -129,18 +223,31 @@ public sealed class AiVideoClassifier
                     }
                 }
             }
-        });
+        };
+        var body = JsonSerializer.SerializeToNode(payload)!.AsObject();
+        if (_local)
+        {
+            body["max_tokens"] = 4096;
+            body["temperature"] = 0;
+            body["chat_template_kwargs"] = JsonSerializer.SerializeToNode(new { enable_thinking = false });
+        }
+        else
+        {
+            body["reasoning_effort"] = "low";
+            body["max_completion_tokens"] = 4096;
+        }
+        request.Content = JsonContent.Create(body);
         using var response = await _client.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException(
-                $"OpenAI AI classification failed (HTTP {(int)response.StatusCode}). " +
-                "Check API access, billing, and rate limits.", null, response.StatusCode);
+                $"{DisplayName} AI classification failed (HTTP {(int)response.StatusCode}).",
+                null, response.StatusCode);
 
         using var envelope = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var choice = envelope.RootElement.GetProperty("choices")[0];
         if (choice.GetProperty("finish_reason").GetString() != "stop" ||
             choice.GetProperty("message").GetProperty("content").GetString() is not { } content)
-            throw new InvalidDataException("OpenAI did not return a complete AI classification.");
+            throw new InvalidDataException($"{DisplayName} did not return a complete AI classification.");
         using var document = JsonDocument.Parse(content);
         var expected = batch.Select(v => v.VideoId).ToHashSet();
         var results = new Dictionary<string, double>();
@@ -150,10 +257,10 @@ public sealed class AiVideoClassifier
             var probability = item.GetProperty("probability").GetDouble();
             if (id is null || !expected.Contains(id) || !double.IsFinite(probability) ||
                 probability is < 0 or > 1 || !results.TryAdd(id, probability))
-                throw new InvalidDataException("OpenAI returned an invalid or duplicate AI classification.");
+                throw new InvalidDataException($"{DisplayName} returned an invalid or duplicate AI classification.");
         }
         if (results.Count != expected.Count)
-            throw new InvalidDataException("OpenAI omitted videos from the AI classification.");
+            throw new InvalidDataException($"{DisplayName} omitted videos from the AI classification.");
         return results;
     }
 }
