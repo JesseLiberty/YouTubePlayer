@@ -90,6 +90,12 @@ On Windows, verify that adding columns renders and scrolls the horizontal scroll
 dotnet run --project Tests\Wpf\ScrollbarVerification.csproj
 ```
 
+To exercise the LAN model with six synthetic examples (no cloud fallback):
+
+```powershell
+dotnet run --project Tests\YouTubePlayer.Verification.csproj -- --live-local
+```
+
 To additionally exercise `gpt-5-mini` with six synthetic video examples, configure
 `OPENAI_API_KEY` and run the following (uses the paid OpenAI API):
 

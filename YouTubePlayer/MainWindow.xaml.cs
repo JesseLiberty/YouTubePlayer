@@ -139,19 +139,31 @@ public partial class MainWindow : Window
             _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             LocalStore.Save(KnownVideosFile, _knownVideoIds);
             classifying = true;
-            StatusText.Text = "Classifying AI videos with gpt-5-mini...";
+            StatusText.Text = "Connecting to the local AI model...";
             var videos = _series.SelectMany(column => column.Videos).DistinctBy(v => v.VideoId).ToArray();
-            var cache = LocalStore.Load<Dictionary<string, AiClassification>>(AiVideoClassifier.CacheFile) ?? [];
-            await new AiVideoClassifier().ClassifyAsync(
-                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)), cache,
-                results =>
+            var completed = await AiVideoClassifier.ClassifyPreferLocalAsync(
+                videos.Select(v => new VideoClassificationInput(v.VideoId, v.Title, v.Description)),
+                file => LocalStore.Load<Dictionary<string, AiClassification>>(file) ?? [],
+                (file, cache) => LocalStore.Save(file, cache),
+                (model, results) =>
                 {
-                    LocalStore.Save(AiVideoClassifier.CacheFile, cache);
                     foreach (var video in videos)
-                        if (results.TryGetValue(video.VideoId, out var probability))
-                            video.AiProbability = probability;
-                    StatusText.Text = $"Classified {results.Count} of {videos.Length} videos for AI.";
+                        video.AiProbability = results.TryGetValue(video.VideoId, out var probability) ? probability : null;
+                    StatusText.Text = $"{model}: classified {results.Count} of {videos.Length} videos for AI.";
+                },
+                error =>
+                {
+                    var answer = MessageBox.Show(this,
+                        $"{error}\n\nUse gpt-5-mini through OpenAI instead? This sends video titles and descriptions " +
+                        "to OpenAI and may incur API charges.\n\nYes: use gpt-5-mini for this Sync.\nNo: exit the application.",
+                        "Local AI model unavailable", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+                    return Task.FromResult(answer == MessageBoxResult.Yes);
                 });
+            if (!completed)
+            {
+                Close();
+                return;
+            }
             StatusText.Text = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
         catch (Exception ex)
