@@ -11,6 +11,7 @@ if (args.Contains("--live") || args.Contains("--live-local"))
 }
 
 VerifyMarkers();
+VerifyKeywords();
 await VerifyCacheAndBatchesAsync();
 await VerifyInvalidResponsesAsync();
 await VerifyLocalAndFallbackAsync();
@@ -48,6 +49,37 @@ static void VerifyMarkers()
         try { web.AiProbability = invalid; throw new Exception("Web accepted invalid probability."); }
         catch (ArgumentOutOfRangeException) { }
     }
+}
+
+static void VerifyKeywords()
+{
+    foreach (var keyword in new[]
+             { "AI", "artificial intelligence", "machine learning", "deep learning",
+                 "neural network", "LLM", "generative AI", "ChatGPT", "machine\nlearning" })
+        foreach (var inTitle in new[] { true, false })
+        {
+            var title = inTitle ? $"About ({keyword.ToUpperInvariant()})!" : "A video";
+            var description = inTitle ? "" : $"Discussing {keyword.ToLowerInvariant()}.";
+            var desktop = new DesktopVideo { VideoId = "keyword", Title = title, Description = description };
+            var web = new WebVideo { VideoId = "keyword", Title = title, Description = description };
+            foreach (var probability in new double?[] { null, 0, 0.8, 0.95, null })
+            {
+                desktop.AiProbability = web.AiProbability = probability;
+                Assert(desktop.AiMark == "AI" && web.AiMark == "AI",
+                    $"Keyword label missing for {keyword} in {(inTitle ? "title" : "description")}.");
+            }
+        }
+    foreach (var text in new[] { "", "chair repair", "paid daily", "email", "ChatGPTish", "LLMsuffix",
+                 "neural networking", "deep learnings", "machine learner" })
+    {
+        var desktop = new DesktopVideo { VideoId = "negative", Title = text, Description = text };
+        var web = new WebVideo { VideoId = "negative", Title = text, Description = text };
+        Assert(desktop.AiMark == "" && web.AiMark == "", $"Unexpected substring match: {text}");
+        desktop.AiProbability = web.AiProbability = 0.81;
+        Assert(desktop.AiMark == "AI" && web.AiMark == "AI", "Semantic-only labels no longer work.");
+    }
+    Assert(!AiVideoKeywords.Matches("machine", "learning"), "A phrase matched across unrelated fields.");
+    Console.WriteLine("PASS: keyword labels in titles/descriptions, boundaries, and semantic OR behavior.");
 }
 
 static HttpResponseMessage Reply(object results, string finishReason = "stop") =>

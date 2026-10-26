@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
+using YouTube.Shared;
 
 namespace YouTubeWeb.Models;
 
@@ -19,6 +20,7 @@ public sealed class VideoItem : INotifyPropertyChanged
     private bool _isNew;
     private bool _isImportant;
     private double? _aiProbability;
+    private bool? _hasAiKeyword;
     private int _positionSeconds;
     private (IReadOnlyList<VideoChapter> Chapters, string Description)? _details;
 
@@ -114,7 +116,8 @@ public sealed class VideoItem : INotifyPropertyChanged
         }
     }
 
-    public string AiMark => AiProbability > 0.8 ? "AI" : "";
+    public string AiMark => (_hasAiKeyword ??= AiVideoKeywords.Matches(Title, Description)) == true ||
+        AiProbability > 0.8 ? "AI" : "";
     public string ImportantMark => IsImportant ? "!" : "";
 
     public string WatchMark => WatchLevel switch

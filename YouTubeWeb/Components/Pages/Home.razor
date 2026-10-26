@@ -59,7 +59,7 @@
                                         <span class="watch-mark" title="@video.WatchToolTip">@video.WatchMark</span>
                                         @if (video.AiMark.Length > 0)
                                         {
-                                            <span class="ai-mark" title="About AI (model-estimated probability above 80%)">@video.AiMark</span>
+                                            <span class="ai-mark" title="AI keyword match or model-estimated probability above 80%">@video.AiMark</span>
                                         }
                                         <span class="important-mark" title="@(video.IsImportant ? "Important video" : null)">@video.ImportantMark</span>
                                         <span class="new-mark" title="@(video.IsNew ? "New video" : null)">@video.NewMark</span>
