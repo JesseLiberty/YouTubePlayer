@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Remove="Wpf\**\*.cs" />
     <Compile Include="..\Shared\AiVideoClassifier.cs" Link="AiVideoClassifier.cs" />
+    <Compile Include="..\Shared\AiVideoKeywords.cs" Link="AiVideoKeywords.cs" />
     <Compile Include="..\YouTubePlayer\Models\SeriesColumn.cs" Link="DesktopModels.cs" />
     <Compile Include="..\YouTubeWeb\Models\SeriesColumn.cs" Link="WebModels.cs" />
   </ItemGroup>

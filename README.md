@@ -15,7 +15,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Delete videos from your list to avoid clutter
 * Drag and drop lists of videos to reorder
 * Drag and drop cards within list
-* Yellow AI labels identify videos semantically classified as about artificial intelligence by the local network model, with an estimated probability strictly greater than 80%
+* Yellow AI labels identify videos with AI keywords or a model-estimated AI probability strictly greater than 80%
 
 ## Choose how to run
 
@@ -95,9 +95,15 @@ videos without shutting down the server. Cloud fallback is never automatic.
 For cloud fallback, set `OPENAI_API_KEY` before launching the app (`OPENAI__APIKEY`
 and `OPENAI:APIKEY` are also supported). OpenAI API billing is separate from ChatGPT.
 
-Video titles and descriptions are sent to the local server for semantic classification, not
-keyword matching. The yellow **AI** marker appears beside the watch check marks only
-when the model estimates a probability strictly above 0.80. Exactly 0.80 is not marked.
+Video titles and descriptions are sent to the local server for semantic classification.
+In addition, both apps check the title and description locally for case-insensitive
+whole-word or whole-phrase matches: **AI**, **artificial intelligence**, **machine learning**,
+**deep learning**, **neural network**, **LLM**, **generative AI**, and **ChatGPT**.
+Whitespace between phrase words can vary; substrings such as "ai" in "chair" do not match.
+The yellow **AI** marker appears beside the watch check marks for either a keyword match
+or a model-estimated probability strictly above 0.80. Keyword labels appear immediately,
+even before classification or when its probability is low. Without a keyword match,
+exactly 0.80 is not marked. Videos with keyword matches still undergo semantic classification.
 These are model estimates based on metadata, not calibrated guarantees or analysis
 of the video's audio. The normal search box remains a keyword search.
 
