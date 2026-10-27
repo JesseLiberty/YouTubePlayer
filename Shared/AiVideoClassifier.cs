@@ -85,6 +85,8 @@ public sealed class AiVideoClassifier
         Func<AiVideoClassifier> createCloud)
     {
         var inputs = videos.ToArray();
+        if (inputs.Length == 0)
+            return true;
         async Task RunAsync(AiVideoClassifier classifier)
         {
             var cache = loadCache(classifier.CacheFileName);
