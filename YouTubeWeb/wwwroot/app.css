@@ -131,6 +131,12 @@ html, body {
     overflow: hidden;
 }
 
+.search-status-text {
+    color: #DDDDDD;
+    margin-left: 8px;
+    white-space: nowrap;
+}
+
 /* ---- Series columns ---- */
 .series-scroll {
     flex: 1;

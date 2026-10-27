@@ -48,6 +48,8 @@ public partial class MainWindow : Window
     private VideoDrag? _activeVideoDrag;
     private (VideoItem Video, SeriesColumn Column, int Index, int ImportantIndex)? _removedVideo;
     private string[] _searchTerms = [];
+    private readonly HashSet<string> _semanticSearchMatches = [];
+    private CancellationTokenSource? _semanticSearchCancellation;
 
     public MainWindow()
     {
@@ -58,6 +60,12 @@ public partial class MainWindow : Window
             new CollectionContainer { Collection = _series },
         };
         StatusText.Text = "Click Sync to load your subscriptions.";
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        CancelSemanticSearch();
+        base.OnClosed(e);
     }
 
     private void HelpButton_Click(object sender, RoutedEventArgs e)
@@ -72,7 +80,7 @@ public partial class MainWindow : Window
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.\n" +
             "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
-            "\u2022 Search video titles and summaries using one or more keywords.\n" +
+            "\u2022 Search video titles and summaries using keywords and semantic matching.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n" + 
             "\u2022 An asterisk indicates a new entry.\n" +
@@ -83,8 +91,12 @@ public partial class MainWindow : Window
 
     private async void SyncButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelSemanticSearch();
+        _semanticSearchMatches.Clear();
+        ApplySearchMatches();
         ClearUndo();
         SyncButton.IsEnabled = false;
+        var restartSearch = true;
         var classifying = false;
         try
         {
@@ -161,6 +173,7 @@ public partial class MainWindow : Window
                 });
             if (!completed)
             {
+                restartSearch = false;
                 Close();
                 return;
             }
@@ -175,21 +188,110 @@ public partial class MainWindow : Window
         finally
         {
             SyncButton.IsEnabled = true;
+            if (restartSearch) StartSemanticSearch();
         }
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => StartSemanticSearch();
+
+    private void StartSemanticSearch()
     {
         _searchTerms = SearchBox.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        CancelSemanticSearch();
+        _semanticSearchMatches.Clear();
+        ApplySearchMatches();
+        var query = SearchBox.Text.Trim();
+        if (query.Length == 0 || !SyncButton.IsEnabled) return;
+
+        var cancellation = new CancellationTokenSource();
+        _semanticSearchCancellation = cancellation;
+        SearchSemanticallyAsync(query, cancellation);
+    }
+
+    private bool MatchesSearch(VideoItem video) =>
+        _searchTerms.Length == 0 || _semanticSearchMatches.Contains(video.VideoId) ||
+        _searchTerms.All(term =>
+            video.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+            video.Description.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    private void ApplySearchMatches()
+    {
         foreach (var video in _series.SelectMany(column => column.Videos)
                      .Concat(_importantColumn.Videos).Distinct())
             video.IsSearchMatch = MatchesSearch(video);
     }
 
-    private bool MatchesSearch(VideoItem video) =>
-        _searchTerms.Length == 0 || _searchTerms.All(term =>
-            video.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-            video.Description.Contains(term, StringComparison.OrdinalIgnoreCase));
+    private async void SearchSemanticallyAsync(string query, CancellationTokenSource cancellation)
+    {
+        var token = cancellation.Token;
+        try
+        {
+            await Task.Delay(350, token);
+            var videos = _series.SelectMany(column => column.Videos)
+                .DistinctBy(video => video.VideoId)
+                .Select(video => new VideoClassificationInput(video.VideoId, video.Title, video.Description))
+                .ToArray();
+            SearchStatusText.Text = "Semantic search: scoring videos...";
+            var completed = await AiVideoClassifier.SearchPreferLocalAsync(
+                query, videos,
+                file => LocalStore.Load<Dictionary<string, AiClassification>>(file) ?? [],
+                (file, cache) => LocalStore.Save(file, cache),
+                (model, results) =>
+                {
+                    if (token.IsCancellationRequested || query != SearchBox.Text.Trim()) return Task.CompletedTask;
+                    _semanticSearchMatches.Clear();
+                    foreach (var (videoId, probability) in results)
+                        if (probability >= AiVideoClassifier.SemanticSearchThreshold)
+                            _semanticSearchMatches.Add(videoId);
+                    ApplySearchMatches();
+                    SearchStatusText.Text = $"{model}: semantic results updated.";
+                    return Task.CompletedTask;
+                },
+                error =>
+                {
+                    var answer = MessageBox.Show(this,
+                        $"{error}\n\nUse gpt-5-mini through OpenAI for semantic search instead? This sends the search query, " +
+                        "video titles, and descriptions to OpenAI and may incur API charges.",
+                        "Local AI model unavailable", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    return Task.FromResult(answer == MessageBoxResult.Yes);
+                },
+                token);
+            if (!token.IsCancellationRequested && query == SearchBox.Text.Trim() && !completed)
+            {
+                _semanticSearchMatches.Clear();
+                ApplySearchMatches();
+                SearchStatusText.Text = "Semantic search skipped; keyword matches remain.";
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (token.IsCancellationRequested || query != SearchBox.Text.Trim()) return;
+            _semanticSearchMatches.Clear();
+            ApplySearchMatches();
+            SearchStatusText.Text = "Semantic search failed; keyword matches remain.";
+            MessageBox.Show(this, ex.Message, "Semantic search failed",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            if (ReferenceEquals(_semanticSearchCancellation, cancellation))
+            {
+                _semanticSearchCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private void CancelSemanticSearch()
+    {
+        _semanticSearchCancellation?.Cancel();
+        _semanticSearchCancellation?.Dispose();
+        _semanticSearchCancellation = null;
+        SearchStatusText.Text = "";
+    }
 
     private async void Unsubscribe_Click(object sender, RoutedEventArgs e)
     {
