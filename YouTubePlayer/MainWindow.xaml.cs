@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -50,6 +51,9 @@ public partial class MainWindow : Window
     private string[] _searchTerms = [];
     private readonly HashSet<string> _semanticSearchMatches = [];
     private CancellationTokenSource? _semanticSearchCancellation;
+    private readonly List<Task> _pendingSearches = [];
+    private bool _closing;
+    private bool _searchesDrained;
 
     public MainWindow()
     {
@@ -62,10 +66,29 @@ public partial class MainWindow : Window
         StatusText.Text = "Click Sync to load your subscriptions.";
     }
 
-    protected override void OnClosed(EventArgs e)
+    protected override async void OnClosing(CancelEventArgs e)
     {
+        base.OnClosing(e);
+        if (e.Cancel || _searchesDrained) return;
+        e.Cancel = true;
+        if (_closing) return;
+        _closing = true;
+        IsEnabled = false;
         CancelSemanticSearch();
-        base.OnClosed(e);
+        try
+        {
+            await Task.Yield();
+            await Task.WhenAll(_pendingSearches);
+            _searchesDrained = true;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            _closing = false;
+            IsEnabled = true;
+            MessageBox.Show(this, ex.Message, "Could not finish saving search results",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void HelpButton_Click(object sender, RoutedEventArgs e)
@@ -201,11 +224,12 @@ public partial class MainWindow : Window
         _semanticSearchMatches.Clear();
         ApplySearchMatches();
         var query = SearchBox.Text.Trim();
-        if (query.Length == 0 || !SyncButton.IsEnabled) return;
+        if (query.Length == 0 || !SyncButton.IsEnabled || _closing) return;
 
         var cancellation = new CancellationTokenSource();
         _semanticSearchCancellation = cancellation;
-        SearchSemanticallyAsync(query, cancellation);
+        _pendingSearches.RemoveAll(task => task.IsCompletedSuccessfully);
+        _pendingSearches.Add(SearchSemanticallyAsync(query, cancellation));
     }
 
     private bool MatchesSearch(VideoItem video) =>
@@ -221,7 +245,7 @@ public partial class MainWindow : Window
             video.IsSearchMatch = MatchesSearch(video);
     }
 
-    private async void SearchSemanticallyAsync(string query, CancellationTokenSource cancellation)
+    private async Task SearchSemanticallyAsync(string query, CancellationTokenSource cancellation)
     {
         var token = cancellation.Token;
         try
@@ -250,6 +274,7 @@ public partial class MainWindow : Window
                 },
                 error =>
                 {
+                    token.ThrowIfCancellationRequested();
                     var answer = MessageBox.Show(this,
                         $"{error}\n\nUse gpt-5-mini through OpenAI for semantic search instead? This sends the search query, " +
                         "video titles, and descriptions to OpenAI and may incur API charges.",
@@ -269,10 +294,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            if (token.IsCancellationRequested || query != SearchBox.Text.Trim()) return;
-            _semanticSearchMatches.Clear();
-            ApplySearchMatches();
-            SearchStatusText.Text = "Semantic search failed; keyword matches remain.";
+            if (!token.IsCancellationRequested && query == SearchBox.Text.Trim())
+            {
+                _semanticSearchMatches.Clear();
+                ApplySearchMatches();
+                SearchStatusText.Text = "Semantic search failed; keyword matches remain.";
+            }
             MessageBox.Show(this, ex.Message, "Semantic search failed",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -281,15 +308,14 @@ public partial class MainWindow : Window
             if (ReferenceEquals(_semanticSearchCancellation, cancellation))
             {
                 _semanticSearchCancellation = null;
-                cancellation.Dispose();
             }
+            cancellation.Dispose();
         }
     }
 
     private void CancelSemanticSearch()
     {
         _semanticSearchCancellation?.Cancel();
-        _semanticSearchCancellation?.Dispose();
         _semanticSearchCancellation = null;
         SearchStatusText.Text = "";
     }

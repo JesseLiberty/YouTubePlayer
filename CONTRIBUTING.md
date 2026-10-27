@@ -84,7 +84,8 @@ Run the dependency-free AI classification checks:
 dotnet run --project Tests\YouTubePlayer.Verification.csproj
 ```
 
-On Windows, verify that adding columns renders and scrolls the horizontal scrollbar:
+On Windows, verify player sizing, horizontal scrolling, search shutdown checkpoints,
+and web search resumption after Help and Unsubscribe dialogs:
 
 ```powershell
 dotnet run --project Tests\Wpf\ScrollbarVerification.csproj

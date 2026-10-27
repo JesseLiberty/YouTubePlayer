@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\YouTubePlayer\YouTubePlayer.csproj" />
+    <ProjectReference Include="..\..\YouTubeWeb\YouTubeWeb.csproj" />
   </ItemGroup>
 </Project>
