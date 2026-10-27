@@ -18,6 +18,7 @@ await VerifyCacheAndBatchesAsync();
 await VerifyLegacyClassificationCacheAsync();
 await VerifySemanticSearchAsync();
 await VerifySearchCheckpointsAsync();
+await VerifyConcurrentSearchesAsync();
 await VerifyInvalidResponsesAsync();
 await VerifyLocalAndFallbackAsync();
 await VerifyProgressiveLocalAsync();
@@ -390,6 +391,108 @@ static async Task VerifySearchCheckpointsAsync()
     Assert(requests == before + 1 && persisted.Count == AiVideoClassifier.SemanticSearchQueryLimit,
         "Least-recently-used query was not evicted.");
     Console.WriteLine("PASS: progressive results, off-context periodic/final/cancellation writes, and bounded recent-query history.");
+}
+
+static async Task VerifyConcurrentSearchesAsync()
+{
+    var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var localRequests = 0;
+    using var http = new HttpClient(new NetworkHandler(async request =>
+    {
+        if (request.Method == HttpMethod.Get)
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":[{\"id\":\"Qwen3.8-Flash-Next-test\"}]}")
+            };
+        Interlocked.Increment(ref localRequests);
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+        using var metadata = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        if (metadata.RootElement.GetProperty("query").GetString() == "slow")
+        {
+            started.TrySetResult();
+            await release.Task;
+        }
+        return Reply(metadata.RootElement.GetProperty("videos").EnumerateArray().Select(video => new
+        {
+            videoId = video.GetProperty("VideoId").GetString(), probability = 0.9
+        }).ToArray());
+    }));
+    using var cloudHttp = new HttpClient(new FakeHandler(request =>
+    {
+        using var metadata = JsonDocument.Parse(request.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        return Reply(metadata.RootElement.GetProperty("videos").EnumerateArray().Select(video => new
+        {
+            videoId = video.GetProperty("VideoId").GetString(), probability = 0.8
+        }).ToArray());
+    }));
+    var local = await AiVideoClassifier.CreateLocalAsync(http);
+    var cloud = new AiVideoClassifier(cloudHttp, "test-key");
+    var files = new Dictionary<string, Dictionary<string, AiClassification>>();
+    var video = new VideoClassificationInput("video", "Title", "");
+    Task<bool> Run(string query, bool useCloud = false,
+        Func<string, IReadOnlyDictionary<string, double>, Task>? update = null,
+        VideoClassificationInput? input = null) =>
+        AiVideoClassifier.SearchPreferLocalAsync(query, [input ?? video],
+            file => files.TryGetValue(file, out var saved) ? new(saved) : [],
+            (file, cache) => files[file] = new(cache),
+            update ?? ((_, _) => Task.CompletedTask),
+            _ => Task.FromResult(true),
+            _ => useCloud
+                ? Task.FromException<AiVideoClassifier>(new LocalModelUnavailableException("Test outage"))
+                : Task.FromResult(local),
+            () => cloud);
+
+    await Run("cached");
+    var slow = Run("slow", update: async (_, results) =>
+    {
+        if (results.Count == 0) return;
+        callbackStarted.TrySetResult();
+        await releaseCallback.Task;
+    });
+    try
+    {
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var beforeCached = localRequests;
+        await Run("cached").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(localRequests == beforeCached, "Concurrent fully cached query made a model request.");
+        await Run("fast").WaitAsync(TimeSpan.FromSeconds(5));
+        await Run("cloud", useCloud: true).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(!slow.IsCompleted, "Slow model request did not remain blocked.");
+
+        release.TrySetResult();
+        await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Run("during-callback").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(!slow.IsCompleted, "Slow result callback did not remain blocked.");
+
+        // Evict the initial snapshot while slow still holds it in memory.
+        for (var i = 0; i < AiVideoClassifier.SemanticSearchQueryLimit; i++)
+            await Run($"concurrent-{i}").WaitAsync(TimeSpan.FromSeconds(5));
+        await Run("slow", input: new("other-video", "Other title", ""))
+            .WaitAsync(TimeSpan.FromSeconds(5));
+    }
+    finally
+    {
+        release.TrySetResult();
+        releaseCallback.TrySetResult();
+        await slow.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    var persisted = files[local.SemanticSearchCacheFileName];
+    string Key(string query) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(query))) + ":video";
+    Assert(persisted.Count == AiVideoClassifier.SemanticSearchQueryLimit + 1,
+        "Concurrent merge exceeded retained query limit.");
+    Assert(persisted.ContainsKey(Key("slow")) &&
+        persisted.ContainsKey(Key("slow").Replace(":video", ":other-video")) &&
+        persisted.ContainsKey(Key("concurrent-9")),
+        "Slow checkpoint overwrote newer concurrent scores.");
+    Assert(!persisted.ContainsKey(Key("cached")) && !persisted.ContainsKey(Key("concurrent-0")),
+        "Stale cache snapshot resurrected evicted history or broke recency.");
+    Assert(files[cloud.SemanticSearchCacheFileName].ContainsKey(Key("cloud")),
+        "Concurrent local checkpoint overwrote the other provider.");
+    Console.WriteLine("PASS: cached, uncached, and cross-provider searches proceed during inference/callbacks; delta merges preserve updates and eviction.");
 }
 
 static async Task VerifyInvalidResponsesAsync()

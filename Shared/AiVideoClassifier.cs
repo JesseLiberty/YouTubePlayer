@@ -145,52 +145,72 @@ public sealed class AiVideoClassifier
 
         async Task RunAsync(AiVideoClassifier classifier)
         {
-            // Serialize cache transactions so a cancelled search cannot overwrite a newer query.
+            var file = classifier.SemanticSearchCacheFileName;
+            Dictionary<string, AiClassification> cache;
             await SearchCacheGate.WaitAsync(ct);
             try
             {
-                var file = classifier.SemanticSearchCacheFileName;
-                var cache = await Task.Run(() => RetainRecentQueries(loadCache(file), query), ct);
-                var dirty = true;
-                int? previousCount = null;
-                var pendingResults = 0;
-                var checkpoint = Stopwatch.StartNew();
-
-                async Task SaveAsync()
-                {
-                    if (!dirty) return;
-                    dirty = false;
-                    // Await without the search token so cancellation still persists completed results.
-                    await Task.Run(() => saveCache(file, cache));
-                    pendingResults = 0;
-                    checkpoint.Restart();
-                }
-
-                try
-                {
-                    await classifier.SearchAsync(query, inputs, cache, async results =>
-                    {
-                        if (previousCount is { } count)
-                        {
-                            var added = results.Count - count;
-                            dirty |= added > 0;
-                            pendingResults += added;
-                        }
-                        previousCount = results.Count;
-                        await onUpdated(classifier.DisplayName, results);
-                        if (pendingResults >= SemanticSearchCheckpointSize ||
-                            (pendingResults > 0 && checkpoint.Elapsed >= TimeSpan.FromSeconds(2)))
-                            await SaveAsync();
-                    }, ct);
-                }
-                finally
-                {
-                    await SaveAsync();
-                }
+                cache = await Task.Run(() => RetainRecentQueries(loadCache(file), query), ct);
             }
             finally
             {
                 SearchCacheGate.Release();
+            }
+
+            var checkpointed = new Dictionary<string, AiClassification>(cache);
+            var dirty = true;
+            int? previousCount = null;
+            var pendingResults = 0;
+            var checkpoint = Stopwatch.StartNew();
+
+            async Task SaveAsync()
+            {
+                if (!dirty) return;
+                dirty = false;
+                // Persist only this run's new scores, not its stale full-cache snapshot.
+                var changes = cache.Where(item =>
+                    !checkpointed.TryGetValue(item.Key, out var saved) || saved != item.Value).ToArray();
+                // Cancellation must still flush completed results.
+                await SearchCacheGate.WaitAsync();
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        var latest = new Dictionary<string, AiClassification>(loadCache(file));
+                        foreach (var (key, value) in changes)
+                            latest[key] = value;
+                        saveCache(file, RetainRecentQueries(latest, query));
+                    });
+                }
+                finally
+                {
+                    SearchCacheGate.Release();
+                }
+                checkpointed = new Dictionary<string, AiClassification>(cache);
+                pendingResults = 0;
+                checkpoint.Restart();
+            }
+
+            try
+            {
+                await classifier.SearchAsync(query, inputs, cache, async results =>
+                {
+                    if (previousCount is { } count)
+                    {
+                        var added = results.Count - count;
+                        dirty |= added > 0;
+                        pendingResults += added;
+                    }
+                    previousCount = results.Count;
+                    await onUpdated(classifier.DisplayName, results);
+                    if (pendingResults >= SemanticSearchCheckpointSize ||
+                        (pendingResults > 0 && checkpoint.Elapsed >= TimeSpan.FromSeconds(2)))
+                        await SaveAsync();
+                }, ct);
+            }
+            finally
+            {
+                await SaveAsync();
             }
         }
 
