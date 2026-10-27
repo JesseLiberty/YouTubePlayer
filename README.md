@@ -118,6 +118,10 @@ Each provider retains the 10 most recently used queries. Cache serialization and
 writes run off the UI thread, checkpointing after 20 new scores or when a result
 arrives at least two seconds after the last checkpoint. Remaining scores are saved
 on completion, cancellation, or failure; cards still update as each result arrives.
+Closing the desktop window waits for pending searches to finish their cancellation
+checkpoints before exiting. In the web app, Help and Unsubscribe pause semantic
+search while their dialogs are open and resume the current query afterward,
+including when unsubscribe is declined or fails.
 Search prefers the local model; if it is unavailable, the app asks before sending the
 query, titles, and descriptions to OpenAI, which may incur API charges. The cache
 fingerprint includes the query and video metadata.

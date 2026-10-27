@@ -184,7 +184,14 @@ public partial class Home : IDisposable
             "\u2022 One check indicates partially read while two checks indicate finished.\n" +
             "\u2022 AI indicates a video having to do with artificial intelligence.\n";
 
-        await _messageBox.ShowAsync(instructions, "YouTube Player", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        try
+        {
+            await _messageBox.ShowAsync(instructions, "YouTube Player", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            StartSemanticSearch();
+        }
     }
 
     private async Task SyncButton_Click()
@@ -299,27 +306,34 @@ public partial class Home : IDisposable
 
         CancelSemanticSearch();
         ClearUndo();
-        var answer = await _messageBox.ShowAsync($"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-        if (answer != MessageBoxResult.Yes) return;
-
-        _unsubscribing.Add(column);
-        StateHasChanged();
         try
         {
-            await Client.UnsubscribeAsync(column.SubscriptionId);
-            _series.Remove(column);
-            foreach (var video in column.Videos)
-                _importantColumn.Videos.Remove(video);
-            if (_selectedVideo is { } selected && column.Videos.Contains(selected))
-                _selectedVideo = null;
-            _statusText = $"Unsubscribed from {column.Title}.";
+            var answer = await _messageBox.ShowAsync($"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != MessageBoxResult.Yes) return;
+
+            _unsubscribing.Add(column);
+            StateHasChanged();
+            try
+            {
+                await Client.UnsubscribeAsync(column.SubscriptionId);
+                _series.Remove(column);
+                foreach (var video in column.Videos)
+                    _importantColumn.Videos.Remove(video);
+                if (_selectedVideo is { } selected && column.Videos.Contains(selected))
+                    _selectedVideo = null;
+                _statusText = $"Unsubscribed from {column.Title}.";
+            }
+            catch (Exception ex)
+            {
+                _unsubscribing.Remove(column);
+                CancelSemanticSearch();
+                await _messageBox.ShowAsync(ex.Message, "Unsubscribe failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _unsubscribing.Remove(column);
-            CancelSemanticSearch();
-            await _messageBox.ShowAsync(ex.Message, "Unsubscribe failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            StartSemanticSearch();
         }
     }
 
