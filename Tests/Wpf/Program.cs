@@ -11,7 +11,19 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        var app = new Application();
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        var player = new PlayerWindow("test", "Window sizing verification", 0);
+        try
+        {
+            Require(player.WindowState == WindowState.Normal, "Player must open without maximizing.");
+            Require(player.Width == 1280 && player.Height == 800, "Player's default size changed.");
+            Require(player.ResizeMode == ResizeMode.CanResize, "Player must remain resizable.");
+            Console.WriteLine("PASS: playback opens in a normal, resizable 1280 x 800 window.");
+        }
+        finally
+        {
+            player.Close();
+        }
         var window = new MainWindow();
         try
         {

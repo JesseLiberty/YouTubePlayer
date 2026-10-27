@@ -66,6 +66,9 @@ On Windows, with WebView2 Runtime installed:
 dotnet run --project YouTubePlayer
 ```
 
+Videos open in a normal, resizable 1280 x 800 window, centered on the main window.
+Use the window's maximize button to enlarge it when desired.
+
 ### Web (ASP.NET Core Blazor)
 
 The web app provides single-click details, double-click playback, right-click importance toggling, removal with Undo, and drag and drop for columns and cards within a column.
