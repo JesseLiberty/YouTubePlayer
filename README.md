@@ -7,7 +7,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Marks videos as started or completed
 * Loads up to 25 recent videos per subscribed channel on Sync
 * Displays your progress and total time for video, along with date and other meta-data
-* Search bar finds matching text in cards
+* Search matches titles and summaries by keywords or semantic relevance
 * Single click on card displays details
 * If details contain chapters, clicking on a chapter brings you there
 * Double-click on video and go to where you left off
@@ -105,10 +105,18 @@ or a model-estimated probability strictly above 0.80. Keyword labels appear imme
 even before classification or when its probability is low. Without a keyword match,
 exactly 0.80 is not marked. Videos with keyword matches still undergo semantic classification.
 These are model estimates based on metadata, not calibrated guarantees or analysis
-of the video's audio. The normal search box remains a keyword search.
+of the video's audio.
 
-Results, including negative classifications, are cached under `%LOCALAPPDATA%\YouTubePlayer`,
-shared by both apps. Local results use `ai-classification-local-qwen-v1.json`;
+The search box keeps its case-insensitive, all-keywords matching and also scores
+each video against the query's meaning after a short typing pause. A semantic score
+of 0.70 or higher adds the video to the results even without keyword overlap.
+Semantic results are cached by query and model under `%LOCALAPPDATA%\YouTubePlayer`.
+Search prefers the local model; if it is unavailable, the app asks before sending the
+query, titles, and descriptions to OpenAI, which may incur API charges. The cache
+fingerprint includes the query and video metadata.
+
+Classification results, including negative classifications, are cached under
+`%LOCALAPPDATA%\YouTubePlayer`, shared by both apps. Local results use `ai-classification-local-qwen-v1.json`;
 approved cloud fallback uses `ai-classification-gpt-5-mini-v1.json`. Cache fingerprints
 include model, endpoint, title, and description. Delete the corresponding cache to force
 a refresh. Sync displays model and progress. OpenAI receives metadata only if you approve

@@ -15,7 +15,8 @@
             <label class="search-label" for="video-search">Search:</label>
             <input id="video-search" class="search-box" type="search" placeholder="Titles and summaries"
                    aria-label="Search video titles and summaries"
-                   @bind="_searchText" @bind:event="oninput" />
+                   value="@_searchText" @oninput="SearchBox_Input" />
+            <span class="search-status-text">@_searchStatusText</span>
             <span class="status-text">@_statusText</span>
         </div>
 

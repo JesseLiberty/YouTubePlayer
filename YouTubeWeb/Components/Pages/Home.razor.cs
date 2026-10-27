@@ -8,7 +8,7 @@ using YouTube.Shared;
 
 namespace YouTubeWeb.Components.Pages;
 
-public partial class Home
+public partial class Home : IDisposable
 {
     private const string HiddenVideosFile = "hidden-videos.json";
     private const string ColumnOrderFile = "column-order.json";
@@ -43,7 +43,12 @@ public partial class Home
     private MessageBox _messageBox = default!;
     private string _statusText = "Click Sync to load your subscriptions.";
     private string _searchText = "";
+    private string _searchStatusText = "";
+    private string[] _searchTerms = [];
+    private readonly HashSet<string> _semanticSearchMatches = [];
+    private CancellationTokenSource? _semanticSearchCancellation;
     private bool _syncing;
+    private bool _disposed;
     private VideoItem? _selectedVideo;
     private SeriesColumn? _dragColumn;
     private VideoDrag? _activeVideoDrag;
@@ -53,10 +58,108 @@ public partial class Home
 
     private bool MatchesSearch(VideoItem video)
     {
-        var terms = _searchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return terms.Length == 0 || terms.All(term =>
+        return _searchTerms.Length == 0 || _semanticSearchMatches.Contains(video.VideoId) ||
+            _searchTerms.All(term =>
             video.Title.Contains(term, StringComparison.OrdinalIgnoreCase) ||
             video.Description.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private Task SearchBox_Input(ChangeEventArgs args)
+    {
+        _searchText = args.Value?.ToString() ?? "";
+        StartSemanticSearch();
+        return Task.CompletedTask;
+    }
+
+    private void StartSemanticSearch()
+    {
+        _searchTerms = _searchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        CancelSemanticSearch();
+        _semanticSearchMatches.Clear();
+        var query = _searchText.Trim();
+        if (query.Length == 0 || _syncing || _disposed) return;
+
+        var cancellation = new CancellationTokenSource();
+        _semanticSearchCancellation = cancellation;
+        _ = SearchSemanticallyAsync(query, cancellation);
+    }
+
+    private async Task SearchSemanticallyAsync(string query, CancellationTokenSource cancellation)
+    {
+        var token = cancellation.Token;
+        try
+        {
+            await Task.Delay(350, token);
+            var videos = _series.SelectMany(column => column.Videos)
+                .DistinctBy(video => video.VideoId)
+                .Select(video => new VideoClassificationInput(video.VideoId, video.Title, video.Description))
+                .ToArray();
+            _searchStatusText = "Semantic search: scoring videos...";
+            await InvokeAsync(StateHasChanged);
+            var completed = await AiVideoClassifier.SearchPreferLocalAsync(
+                query, videos,
+                file => LocalStore.Load<Dictionary<string, AiClassification>>(file) ?? [],
+                (file, cache) => LocalStore.Save(file, cache),
+                async (model, results) =>
+                {
+                    if (token.IsCancellationRequested || query != _searchText.Trim()) return;
+                    _semanticSearchMatches.Clear();
+                    foreach (var (videoId, probability) in results)
+                        if (probability >= AiVideoClassifier.SemanticSearchThreshold)
+                            _semanticSearchMatches.Add(videoId);
+                    _searchStatusText = $"{model}: semantic results updated.";
+                    await InvokeAsync(StateHasChanged);
+                },
+                async error =>
+                {
+                    var answer = await _messageBox.ShowAsync(
+                        $"{error}\n\nUse gpt-5-mini through OpenAI for semantic search instead? This sends the search query, " +
+                        "video titles, and descriptions to OpenAI and may incur API charges.",
+                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    return answer == MessageBoxResult.Yes;
+                },
+                token);
+            if (!token.IsCancellationRequested && query == _searchText.Trim() && !completed)
+            {
+                _semanticSearchMatches.Clear();
+                _searchStatusText = "Semantic search skipped; keyword matches remain.";
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (token.IsCancellationRequested || query != _searchText.Trim()) return;
+            _semanticSearchMatches.Clear();
+            _searchStatusText = "Semantic search failed; keyword matches remain.";
+            await InvokeAsync(StateHasChanged);
+            await _messageBox.ShowAsync(ex.Message, "Semantic search failed",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            if (ReferenceEquals(_semanticSearchCancellation, cancellation))
+            {
+                _semanticSearchCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private void CancelSemanticSearch()
+    {
+        _semanticSearchCancellation?.Cancel();
+        _semanticSearchCancellation?.Dispose();
+        _semanticSearchCancellation = null;
+        _searchStatusText = "";
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        CancelSemanticSearch();
     }
 
     private async Task HelpButton_Click()
@@ -71,7 +174,7 @@ public partial class Home
             "\u2022 If chapters are listed, clicking on one will bring you to the video at that offset.\n" +
             "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
-            "\u2022 Search video titles and summaries using one or more keywords.\n" +
+            "\u2022 Search video titles and summaries using keywords and semantic matching.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n" +
             "\u2022 An asterisk indicates a new entry.\n" +
@@ -83,6 +186,8 @@ public partial class Home
 
     private async Task SyncButton_Click()
     {
+        CancelSemanticSearch();
+        _semanticSearchMatches.Clear();
         ClearUndo();
         _syncing = true;
         var classifying = false;
@@ -175,6 +280,7 @@ public partial class Home
         finally
         {
             _syncing = false;
+            StartSemanticSearch();
         }
     }
 

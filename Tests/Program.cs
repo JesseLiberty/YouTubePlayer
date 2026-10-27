@@ -13,6 +13,7 @@ if (args.Contains("--live") || args.Contains("--live-local"))
 VerifyMarkers();
 VerifyKeywords();
 await VerifyCacheAndBatchesAsync();
+await VerifySemanticSearchAsync();
 await VerifyInvalidResponsesAsync();
 await VerifyLocalAndFallbackAsync();
 await VerifyProgressiveLocalAsync();
@@ -135,6 +136,100 @@ static async Task VerifyCacheAndBatchesAsync()
     Assert(requests == 5, "Invalid cached probability was trusted.");
     await classifier.ClassifyAsync([], cache, _ => { });
     Assert(requests == 5, "Empty input made an API call.");
+}
+
+static async Task VerifySemanticSearchAsync()
+{
+    var requests = 0;
+    string? lastQuery = null;
+    using var client = new HttpClient(new FakeHandler(request =>
+    {
+        requests++;
+        using var body = JsonDocument.Parse(request.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        lastQuery = body.RootElement.GetProperty("query").GetString();
+        var videos = body.RootElement.GetProperty("videos").EnumerateArray().ToArray();
+        var prompt = request.GetProperty("messages")[0].GetProperty("content").GetString()!;
+        Assert(prompt.Contains("by meaning", StringComparison.Ordinal) &&
+            prompt.Contains("search query", StringComparison.Ordinal),
+            "Semantic search prompt was not used.");
+        return Reply(videos.Select(video => new
+        {
+            videoId = video.GetProperty("VideoId").GetString(),
+            probability = video.GetProperty("VideoId").GetString() == "relevant" ? 0.9 : 0.2
+        }).ToArray());
+    }));
+
+    var classifier = new AiVideoClassifier(client, "test-key");
+    var caches = new Dictionary<string, Dictionary<string, AiClassification>>();
+    var updates = new List<IReadOnlyDictionary<string, double>>();
+    var inputs = new[]
+    {
+        new VideoClassificationInput("relevant", "How to repair a sink", "A guide to plumbing."),
+        new VideoClassificationInput("unrelated", "A bread recipe", "Bake a sourdough loaf.")
+    };
+    async Task Run(string query) => await AiVideoClassifier.SearchPreferLocalAsync(
+        query, inputs,
+        file => caches.GetValueOrDefault(file) ?? [],
+        (file, cache) => caches[file] = cache,
+        (_, results) =>
+        {
+            updates.Add(new Dictionary<string, double>(results));
+            return Task.CompletedTask;
+        },
+        _ => Task.FromResult(false),
+        _ => Task.FromResult(classifier),
+        () => classifier);
+
+    await Run("plumbing repair");
+    Assert(requests == 1 && lastQuery == "plumbing repair", "Search query was not passed to semantic scoring.");
+    Assert(updates[^1]["relevant"] >= AiVideoClassifier.SemanticSearchThreshold &&
+        updates[^1]["unrelated"] < AiVideoClassifier.SemanticSearchThreshold,
+        "Semantic search scores were not preserved for relevance filtering.");
+    var searchCache = caches[classifier.SemanticSearchCacheFileName];
+    Assert(searchCache.Count == 2, "Semantic search scores were not cached.");
+
+    await Run("plumbing repair");
+    Assert(requests == 1 && updates[^1].Count == 2, "Repeated query did not use cached scores.");
+    await Run("bread baking");
+    Assert(requests == 2 && caches[classifier.SemanticSearchCacheFileName].Count == 4,
+        "Query-specific semantic search cache entries collided.");
+
+    var cloudRequests = 0;
+    using var cloudHttp = new HttpClient(new FakeHandler(request =>
+    {
+        cloudRequests++;
+        using var body = JsonDocument.Parse(request.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        var videos = body.RootElement.GetProperty("videos").EnumerateArray();
+        return Reply(videos.Select(video => new
+        {
+            videoId = video.GetProperty("VideoId").GetString(),
+            probability = 0.8
+        }).ToArray());
+    }));
+    var cloud = new AiVideoClassifier(cloudHttp, "test-key");
+    var consentPrompts = 0;
+    Task<AiVideoClassifier> Unavailable(CancellationToken _) =>
+        throw new LocalModelUnavailableException("Local model unavailable.");
+    var approved = false;
+    async Task<bool> RunWithFallback() => await AiVideoClassifier.SearchPreferLocalAsync(
+        "plumbing",
+        [inputs[0]],
+        _ => [],
+        (_, _) => { },
+        (_, _) => Task.CompletedTask,
+        _ =>
+        {
+            consentPrompts++;
+            return Task.FromResult(approved);
+        },
+        Unavailable,
+        () => cloud);
+    Assert(!await RunWithFallback() && consentPrompts == 1 && cloudRequests == 0,
+        "Declined semantic-search cloud fallback contacted OpenAI.");
+    approved = true;
+    Assert(await RunWithFallback() && consentPrompts == 2 && cloudRequests == 1,
+        "Approved semantic-search cloud fallback did not run.");
+    Console.WriteLine("PASS: semantic search query scoring, threshold-ready results, and query-specific caching.");
 }
 
 static async Task VerifyInvalidResponsesAsync()
