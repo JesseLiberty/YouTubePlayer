@@ -94,6 +94,7 @@ public partial class Home : IDisposable
                 .DistinctBy(video => video.VideoId)
                 .Select(video => new VideoClassificationInput(video.VideoId, video.Title, video.Description))
                 .ToArray();
+            if (videos.Length == 0) return;
             _searchStatusText = "Semantic search: scoring videos...";
             await InvokeAsync(StateHasChanged);
             var completed = await AiVideoClassifier.SearchPreferLocalAsync(
@@ -112,6 +113,7 @@ public partial class Home : IDisposable
                 },
                 async error =>
                 {
+                    token.ThrowIfCancellationRequested();
                     var answer = await _messageBox.ShowAsync(
                         $"{error}\n\nUse gpt-5-mini through OpenAI for semantic search instead? This sends the search query, " +
                         "video titles, and descriptions to OpenAI and may incur API charges.",
@@ -164,6 +166,7 @@ public partial class Home : IDisposable
 
     private async Task HelpButton_Click()
     {
+        CancelSemanticSearch();
         var instructions =
             "\u00A9 Copyright 2026 Jesse Liberty\n\n" +
             "\u2022 Double click on a card (or the details page) to go to the video at last offset viewed\n" +
@@ -294,6 +297,7 @@ public partial class Home : IDisposable
     {
         if (column.IsImportantColumn) return;
 
+        CancelSemanticSearch();
         ClearUndo();
         var answer = await _messageBox.ShowAsync($"Unsubscribe from \"{column.Title}\"?", "Unsubscribe",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -314,6 +318,7 @@ public partial class Home : IDisposable
         catch (Exception ex)
         {
             _unsubscribing.Remove(column);
+            CancelSemanticSearch();
             await _messageBox.ShowAsync(ex.Message, "Unsubscribe failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }

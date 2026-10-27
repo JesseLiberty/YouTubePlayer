@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -17,6 +18,9 @@ public sealed class AiVideoClassifier
     public const string CacheFile = "ai-classification-gpt-5-mini-v1.json";
     public const string SemanticSearchCacheFile = "semantic-search-gpt-5-mini-v1.json";
     public const double SemanticSearchThreshold = 0.7;
+    internal const int SemanticSearchQueryLimit = 10;
+    internal const int SemanticSearchCheckpointSize = 20;
+    private static readonly SemaphoreSlim SearchCacheGate = new(1, 1);
     private const string Model = "gpt-5-mini";
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly HttpClient _client;
@@ -141,12 +145,53 @@ public sealed class AiVideoClassifier
 
         async Task RunAsync(AiVideoClassifier classifier)
         {
-            var cache = loadCache(classifier.SemanticSearchCacheFileName);
-            await classifier.SearchAsync(query, inputs, cache, async results =>
+            // Serialize cache transactions so a cancelled search cannot overwrite a newer query.
+            await SearchCacheGate.WaitAsync(ct);
+            try
             {
-                saveCache(classifier.SemanticSearchCacheFileName, cache);
-                await onUpdated(classifier.DisplayName, results);
-            }, ct);
+                var file = classifier.SemanticSearchCacheFileName;
+                var cache = await Task.Run(() => RetainRecentQueries(loadCache(file), query), ct);
+                var dirty = true;
+                int? previousCount = null;
+                var pendingResults = 0;
+                var checkpoint = Stopwatch.StartNew();
+
+                async Task SaveAsync()
+                {
+                    if (!dirty) return;
+                    dirty = false;
+                    // Await without the search token so cancellation still persists completed results.
+                    await Task.Run(() => saveCache(file, cache));
+                    pendingResults = 0;
+                    checkpoint.Restart();
+                }
+
+                try
+                {
+                    await classifier.SearchAsync(query, inputs, cache, async results =>
+                    {
+                        if (previousCount is { } count)
+                        {
+                            var added = results.Count - count;
+                            dirty |= added > 0;
+                            pendingResults += added;
+                        }
+                        previousCount = results.Count;
+                        await onUpdated(classifier.DisplayName, results);
+                        if (pendingResults >= SemanticSearchCheckpointSize ||
+                            (pendingResults > 0 && checkpoint.Elapsed >= TimeSpan.FromSeconds(2)))
+                            await SaveAsync();
+                    }, ct);
+                }
+                finally
+                {
+                    await SaveAsync();
+                }
+            }
+            finally
+            {
+                SearchCacheGate.Release();
+            }
         }
 
         try
@@ -156,12 +201,26 @@ public sealed class AiVideoClassifier
         }
         catch (LocalModelUnavailableException ex) when (!ct.IsCancellationRequested)
         {
+            ct.ThrowIfCancellationRequested();
             if (!await confirmCloud(ex.Message)) return false;
         }
 
         ct.ThrowIfCancellationRequested();
         await RunAsync(createCloud());
         return true;
+    }
+
+    private static Dictionary<string, AiClassification> RetainRecentQueries(
+        Dictionary<string, AiClassification> cache, string query)
+    {
+        var current = CacheKey("", query);
+        var recent = cache.Keys.Select(key => key[..(key.IndexOf(':') + 1)])
+            .Where(prefix => prefix.Length > 0 && prefix != current)
+            .Distinct().TakeLast(SemanticSearchQueryLimit - 1).ToHashSet();
+        // Dictionary insertion order records query recency; put the current query last.
+        return cache.Where(item => recent.Contains(item.Key[..(item.Key.IndexOf(':') + 1)]))
+            .Concat(cache.Where(item => item.Key.StartsWith(current, StringComparison.Ordinal)))
+            .ToDictionary(item => item.Key, item => item.Value);
     }
 
     private static bool IsModelFailure(Exception ex) =>
@@ -232,13 +291,17 @@ public sealed class AiVideoClassifier
         }
     }
 
-    private string Fingerprint(VideoClassificationInput input, string? semanticQuery) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(new
+    private string Fingerprint(VideoClassificationInput input, string? semanticQuery)
+    {
+        var metadata = semanticQuery is null
+            ? JsonSerializer.Serialize(new { Model = _model, Endpoint = _endpoint, Version = 1, input.Title, input.Description })
+            : JsonSerializer.Serialize(new
             {
-                Model = _model, Endpoint = _endpoint, Version = semanticQuery is null ? 1 : 2,
+                Model = _model, Endpoint = _endpoint, Version = 2,
                 Query = semanticQuery, input.Title, input.Description
-            }))));
+            });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(metadata)));
+    }
 
     private static string CacheKey(string videoId, string? semanticQuery) =>
         semanticQuery is null ? videoId : $"{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(semanticQuery)))}:{videoId}";

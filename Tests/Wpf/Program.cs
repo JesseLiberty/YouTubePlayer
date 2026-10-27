@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Threading;
 using YouTubePlayer;
 using YouTubePlayer.Models;
 
@@ -41,6 +42,21 @@ internal static class Program
             Require(viewer.ComputedHorizontalScrollBarVisibility != Visibility.Visible,
                 "Scrollbar did not hide when columns were cleared.");
             Console.WriteLine("PASS: column overflow renders the dark thumb, scrolls, and clears without crashing.");
+
+            var search = (TextBox)window.FindName("SearchBox");
+            var searchStatus = (TextBlock)window.FindName("SearchStatusText");
+            search.Text = "empty search";
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                frame.Continue = false;
+            };
+            timer.Start();
+            Dispatcher.PushFrame(frame);
+            Require(searchStatus.Text.Length == 0, "Empty search left a scoring status displayed.");
+            Console.WriteLine("PASS: desktop search without loaded videos leaves no pending scoring status.");
         }
         finally
         {

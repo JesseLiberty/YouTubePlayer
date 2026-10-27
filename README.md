@@ -111,6 +111,10 @@ The search box keeps its case-insensitive, all-keywords matching and also scores
 each video against the query's meaning after a short typing pause. A semantic score
 of 0.70 or higher adds the video to the results even without keyword overlap.
 Semantic results are cached by query and model under `%LOCALAPPDATA%\YouTubePlayer`.
+Each provider retains the 10 most recently used queries. Cache serialization and
+writes run off the UI thread, checkpointing after 20 new scores or when a result
+arrives at least two seconds after the last checkpoint. Remaining scores are saved
+on completion, cancellation, or failure; cards still update as each result arrives.
 Search prefers the local model; if it is unavailable, the app asks before sending the
 query, titles, and descriptions to OpenAI, which may incur API charges. The cache
 fingerprint includes the query and video metadata.
