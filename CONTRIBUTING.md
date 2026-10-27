@@ -90,6 +90,15 @@ On Windows, verify that adding columns renders and scrolls the horizontal scroll
 dotnet run --project Tests\Wpf\ScrollbarVerification.csproj
 ```
 
+Verify desktop playback event handling with Node.js (no packages required):
+
+```powershell
+node Tests\playback-verification.cjs
+```
+
+This executes the injected playback script against ad endings, premature events,
+source transitions, and genuine video completion without contacting YouTube.
+
 To exercise the LAN model with six synthetic examples (no cloud fallback):
 
 ```powershell

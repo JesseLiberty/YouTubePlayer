@@ -66,6 +66,9 @@ On Windows, with WebView2 Runtime installed:
 dotnet run --project YouTubePlayer
 ```
 
+The desktop playback window closes automatically only when the requested main video
+finishes. Ad endings and unrelated video elements do not count as completion.
+
 ### Web (ASP.NET Core Blazor)
 
 The web app provides single-click details, double-click playback, right-click importance toggling, removal with Undo, and drag and drop for columns and cards within a column.
