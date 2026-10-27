@@ -231,6 +231,7 @@ public partial class MainWindow : Window
                 .DistinctBy(video => video.VideoId)
                 .Select(video => new VideoClassificationInput(video.VideoId, video.Title, video.Description))
                 .ToArray();
+            if (videos.Length == 0) return;
             SearchStatusText.Text = "Semantic search: scoring videos...";
             var completed = await AiVideoClassifier.SearchPreferLocalAsync(
                 query, videos,

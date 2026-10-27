@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using YouTube.Shared;
 using DesktopVideo = YouTubePlayer.Models.VideoItem;
@@ -13,7 +15,9 @@ if (args.Contains("--live") || args.Contains("--live-local"))
 VerifyMarkers();
 VerifyKeywords();
 await VerifyCacheAndBatchesAsync();
+await VerifyLegacyClassificationCacheAsync();
 await VerifySemanticSearchAsync();
+await VerifySearchCheckpointsAsync();
 await VerifyInvalidResponsesAsync();
 await VerifyLocalAndFallbackAsync();
 await VerifyProgressiveLocalAsync();
@@ -229,7 +233,163 @@ static async Task VerifySemanticSearchAsync()
     approved = true;
     Assert(await RunWithFallback() && consentPrompts == 2 && cloudRequests == 1,
         "Approved semantic-search cloud fallback did not run.");
+    var beforeEmpty = consentPrompts;
+    Assert(await AiVideoClassifier.SearchPreferLocalAsync("empty", [],
+        _ => throw new Exception("Empty search loaded a cache."),
+        (_, _) => throw new Exception("Empty search saved a cache."),
+        (_, _) => throw new Exception("Empty search published results."),
+        _ => throw new Exception("Empty search prompted for cloud."),
+        _ => throw new Exception("Empty search discovered a model."),
+        () => throw new Exception("Empty search created a cloud client.")) && consentPrompts == beforeEmpty,
+        "Empty semantic search did not return immediately.");
     Console.WriteLine("PASS: semantic search query scoring, threshold-ready results, and query-specific caching.");
+}
+
+static async Task VerifyLegacyClassificationCacheAsync()
+{
+    using var client = new HttpClient(new FakeHandler(_ =>
+        throw new Exception("Legacy AI classification cache was invalidated.")));
+    var video = new VideoClassificationInput("legacy", "Original title", "Original description");
+    var json = JsonSerializer.Serialize(new
+    {
+        Model = "gpt-5-mini",
+        Endpoint = "https://api.openai.com/v1/chat/completions",
+        Version = 1,
+        video.Title,
+        video.Description
+    });
+    var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+    var cache = new Dictionary<string, AiClassification> { [video.VideoId] = new(fingerprint, 0.95) };
+    await new AiVideoClassifier(client, "test-key").ClassifyAsync([video], cache,
+        results => Assert(results[video.VideoId] == 0.95, "Legacy cached score was not reused."));
+    Console.WriteLine("PASS: pre-semantic-search classification fingerprints remain compatible.");
+}
+
+static async Task VerifySearchCheckpointsAsync()
+{
+    var requests = 0;
+    using var http = new HttpClient(new NetworkHandler(async request =>
+    {
+        if (request.Method == HttpMethod.Get)
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":[{\"id\":\"Qwen3.8-Flash-Next-test\"}]}")
+            };
+        requests++;
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+        using var metadata = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+        var videos = metadata.RootElement.GetProperty("videos");
+        Assert(videos.GetArrayLength() == 1, "Local semantic scoring batch size changed.");
+        return Reply(new[] { new { videoId = videos[0].GetProperty("VideoId").GetString(), probability = 0.9 } });
+    }));
+    var local = await AiVideoClassifier.CreateLocalAsync(http);
+    var persisted = new Dictionary<string, AiClassification>();
+    var saves = 0;
+    var updates = 0;
+    void Save(string _, Dictionary<string, AiClassification> cache)
+    {
+        Assert(Thread.CurrentThread.IsThreadPoolThread && SynchronizationContext.Current is null,
+            "Search cache persistence did not run off the UI context.");
+        persisted = new(cache);
+        saves++;
+    }
+    Task<bool> Run(string query, VideoClassificationInput[] videos,
+        Func<string, IReadOnlyDictionary<string, double>, Task>? update = null,
+        CancellationToken ct = default,
+        Action<string, Dictionary<string, AiClassification>>? save = null) =>
+        AiVideoClassifier.SearchPreferLocalAsync(query, videos,
+            _ => new Dictionary<string, AiClassification>(persisted), save ?? Save,
+            update ?? ((_, _) => { updates++; return Task.CompletedTask; }),
+            _ => throw new Exception("Healthy local search prompted for cloud."),
+            _ => Task.FromResult(local),
+            () => throw new Exception("Healthy local search used cloud."), ct);
+
+    var batch = Enumerable.Range(0, 45).Select(i => new VideoClassificationInput(i.ToString(), "Title", "")).ToArray();
+    await Run("first", batch);
+    Assert(requests == 45 && updates == 46, "Semantic results were not published progressively.");
+    Assert(saves == 3 && persisted.Count == 45, "Search cache was not checkpointed at 20, 40, and completion.");
+
+    using (var cancellation = new CancellationTokenSource())
+    {
+        var savesBefore = saves;
+        try
+        {
+            await Run("cancelled", batch, (_, results) =>
+            {
+                if (results.Count == 3) cancellation.Cancel();
+                return Task.CompletedTask;
+            }, cancellation.Token);
+            throw new Exception("Search cancellation was ignored.");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        Assert(saves == savesBefore + 1 && persisted.Count == 48,
+            "Cancellation did not flush the three completed scores.");
+    }
+
+    var beforeTimed = saves;
+    await Run("timed", batch[..2], async (_, results) =>
+    {
+        if (results.Count == 1) await Task.Delay(TimeSpan.FromSeconds(2.1));
+        if (results.Count == 2)
+            Assert(saves == beforeTimed + 1, "Time-based checkpoint did not run before the second result.");
+    });
+    Assert(saves == beforeTimed + 2, "Time-based checkpoint lost the final score.");
+
+    using (var cancellation = new CancellationTokenSource())
+    using (var releaseSave = new ManualResetEventSlim())
+    {
+        var saving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var older = Run("older-overlap", batch[..2], (_, results) =>
+        {
+            if (results.Count == 1) cancellation.Cancel();
+            return Task.CompletedTask;
+        }, cancellation.Token, (file, cache) =>
+        {
+            saving.TrySetResult();
+            Assert(releaseSave.Wait(TimeSpan.FromSeconds(5)), "Timed out waiting to release cancellation checkpoint.");
+            Save(file, cache);
+        });
+        Task<bool>? newer = null;
+        try
+        {
+            await saving.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            newer = Run("newer-overlap", [batch[0]]);
+            Assert(!newer.IsCompleted, "New search did not wait for the old cancellation checkpoint.");
+        }
+        finally
+        {
+            releaseSave.Set();
+            try
+            {
+                await older;
+                throw new Exception("Overlapping search ignored cancellation.");
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            if (newer is not null) await newer;
+        }
+        foreach (var query in new[] { "older-overlap", "newer-overlap" })
+        {
+            var prefix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(query))) + ":";
+            Assert(persisted.Keys.Any(key => key.StartsWith(prefix, StringComparison.Ordinal)),
+                "Overlapping checkpoint lost a query's completed scores.");
+        }
+    }
+
+    for (var i = 0; i < AiVideoClassifier.SemanticSearchQueryLimit; i++)
+        await Run($"recent-{i}", [batch[0]]);
+    Assert(persisted.Count == AiVideoClassifier.SemanticSearchQueryLimit,
+        "Old query history was not evicted.");
+    var before = requests;
+    await Run("recent-0", [batch[0]]);
+    Assert(requests == before, "A retained query did not reuse cached results.");
+    await Run("new-query", [batch[0]]);
+    before = requests;
+    await Run("recent-0", [batch[0]]);
+    Assert(requests == before, "Revisited query was not marked as recently used.");
+    await Run("recent-1", [batch[0]]);
+    Assert(requests == before + 1 && persisted.Count == AiVideoClassifier.SemanticSearchQueryLimit,
+        "Least-recently-used query was not evicted.");
+    Console.WriteLine("PASS: progressive results, off-context periodic/final/cancellation writes, and bounded recent-query history.");
 }
 
 static async Task VerifyInvalidResponsesAsync()
