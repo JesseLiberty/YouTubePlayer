@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -105,9 +106,10 @@ public partial class MainWindow : Window
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
             "\u2022 Search video titles and summaries using keywords and semantic matching.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
-            "\u2022 You can undo the last hide by clicking the undo button.\n" + 
+            "\u2022 You can undo the last hide by clicking the undo button.\n" +
+              "\u2022 Clicking on the url puts it on the clipboard.\n" +
             "\u2022 An asterisk indicates a new entry.\n" +
-            "\u2022 One check indicates partially read while two checks indicate finished.\n"+
+            "\u2022 One check indicates partially read while two checks indicate finished.\n" +
             "\u2022 AI indicates a video having to do with artificial intelligence.\n";
         MessageBox.Show(this, instructions, "YouTube Player", MessageBoxButton.OK, MessageBoxImage.Information);
     }
@@ -484,6 +486,27 @@ public partial class MainWindow : Window
 
         ClearUndo();
         DetailsPane.DataContext = video;
+    }
+
+    private void VideoUrl_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
+    }
+
+    private void CardVideoUrl_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(e.Uri.AbsoluteUri);
+            StatusText.Text = "Copied video URL to clipboard.";
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            StatusText.Text = $"Could not copy video URL: {ex.Message}";
+        }
+
+        e.Handled = true;
     }
 
     private void Video_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

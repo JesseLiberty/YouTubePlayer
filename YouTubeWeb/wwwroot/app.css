@@ -311,6 +311,19 @@ html, body {
     color: #526273;
 }
 
+.details-video-url {
+    display: block;
+    overflow-wrap: anywhere;
+    margin-bottom: 16px;
+}
+
+.card-video-url {
+    display: block;
+    overflow-wrap: anywhere;
+    margin-bottom: 4px;
+    font-size: 10px;
+}
+
 .details-new,
 .details-important {
     color: #9A6700;

@@ -199,6 +199,12 @@
                                                             <TextBlock Text="{Binding NewMark}" Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
                                                                        Margin="6,0,0,0" ToolTip="New video" />
                                                         </StackPanel>
+                                                        <TextBlock FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4">
+                                                            <Hyperlink NavigateUri="{Binding VideoUrl, Mode=OneWay}" RequestNavigate="CardVideoUrl_RequestNavigate"
+                                                                       Foreground="#80CBC4">
+                                                                <Run Text="{Binding VideoUrl, Mode=OneWay}" />
+                                                            </Hyperlink>
+                                                        </TextBlock>
                                                         <TextBlock Text="{Binding Description}"
                                                                    Foreground="#CCCCCC" FontSize="12" TextWrapping="Wrap"
                                                                    TextTrimming="WordEllipsis" MaxHeight="64" />
@@ -234,8 +240,13 @@
                     <StackPanel>
                         <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold"
                                    Foreground="#202A35" TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding PublishedDate}" Foreground="#526273" />
+                        <TextBlock Margin="0,0,0,16" TextWrapping="Wrap">
+                            <Hyperlink NavigateUri="{Binding VideoUrl, Mode=OneWay}" RequestNavigate="VideoUrl_RequestNavigate">
+                                <Run Text="{Binding VideoUrl, Mode=OneWay}" />
+                            </Hyperlink>
+                        </TextBlock>
                         <WrapPanel Margin="0,0,0,16">
-                            <TextBlock Text="{Binding PublishedDate}" Foreground="#526273" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding NewMark}" Foreground="#9A6700" FontWeight="Bold" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding WatchMark}" Foreground="#2E7D32" FontWeight="Bold" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding PlaybackTime}" Foreground="#526273" Margin="0,0,8,0" />

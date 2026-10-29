@@ -30,6 +30,7 @@ public sealed class VideoItem : INotifyPropertyChanged
     public string Description { get; init; } = "";
     public DateTime? PublishedAt { get; init; }
     public TimeSpan? Duration { get; init; }
+    public string VideoUrl => $"https://www.youtube.com/watch?v={Uri.EscapeDataString(VideoId)}";
 
     private (IReadOnlyList<VideoChapter> Chapters, string Description) Details =>
         _details ??= VideoChapter.ParseDescription(Description);

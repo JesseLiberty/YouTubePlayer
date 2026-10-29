@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 using YouTubeWeb.Components.Shared;
 using YouTubeWeb.Models;
 using YouTubeWeb.Services;
@@ -21,6 +22,7 @@ public partial class Home : IDisposable
     private const string ImportantVideosFile = "important-videos.json";
 
     [Inject] private YouTubeClient Client { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
 
     private readonly ObservableCollection<SeriesColumn> _series = new();
     private readonly SeriesColumn _importantColumn = new()
@@ -69,6 +71,19 @@ public partial class Home : IDisposable
         _searchText = args.Value?.ToString() ?? "";
         StartSemanticSearch();
         return Task.CompletedTask;
+    }
+
+    private async Task CopyVideoUrl_Click(string url)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", url);
+            _statusText = "Copied video URL to clipboard.";
+        }
+        catch (JSException ex)
+        {
+            _statusText = $"Could not copy video URL: {ex.Message}";
+        }
     }
 
     private void StartSemanticSearch()

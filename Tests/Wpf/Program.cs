@@ -30,12 +30,14 @@ internal static class Program
         try
         {
             var items = (ItemsControl)window.FindName("SeriesItems");
-            items.ItemsSource = Enumerable.Range(0, 12).Select(i => new SeriesColumn
+            var columns = Enumerable.Range(0, 12).Select(i => new SeriesColumn
             {
                 SubscriptionId = $"subscription-{i}",
                 ChannelId = $"channel-{i}",
                 Title = $"Test channel {i}"
             }).ToArray();
+            columns[0].Videos.Add(new VideoItem { VideoId = "test-video", Title = "Test video" });
+            items.ItemsSource = columns;
             window.Show();
             window.UpdateLayout();
             var viewer = Descendants<ScrollViewer>(window)

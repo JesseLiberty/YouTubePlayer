@@ -65,6 +65,9 @@
                                         <span class="important-mark" title="@(video.IsImportant ? "Important video" : null)">@video.ImportantMark</span>
                                         <span class="new-mark" title="@(video.IsNew ? "New video" : null)">@video.NewMark</span>
                                     </div>
+                                    <a class="card-video-url" href="@video.VideoUrl" target="_blank" rel="noopener noreferrer"
+                                       @onclick="() => CopyVideoUrl_Click(video.VideoUrl)"
+                                       @onclick:stopPropagation @onclick:preventDefault>@video.VideoUrl</a>
                                     <div class="card-description" data-word-ellipsis="@video.Description"></div>
                                 </div>
                                 <button class="wpf-button remove-button" title="Remove from list"
@@ -83,8 +86,9 @@
         {
             <div class="details-scroll">
                 <div class="details-title">@selected.Title</div>
+                <div class="details-date">@selected.PublishedDate</div>
+                <a class="details-video-url" href="@selected.VideoUrl" target="_blank" rel="noopener noreferrer">@selected.VideoUrl</a>
                 <div class="details-meta">
-                    <span class="details-date">@selected.PublishedDate</span>
                     <span class="details-new">@selected.NewMark</span>
                     <span class="details-watch">@selected.WatchMark</span>
                     <span class="details-playback">@selected.PlaybackTime</span>
