@@ -78,17 +78,31 @@ dotnet build YouTubeWeb\YouTubeWeb.csproj
 
 ## Before opening a pull request
 
-Run the dependency-free AI classification checks:
+Run the dependency-free AI classification and shared-state persistence checks:
 
 ```powershell
 dotnet run --project Tests\YouTubePlayer.Verification.csproj
 ```
 
-On Windows, verify player sizing, horizontal scrolling, search shutdown checkpoints,
-and web search resumption after Help and Unsubscribe dialogs:
+On Windows, verify player sizing, horizontal scrolling, Sync cancellation/draining,
+discarding loads for unsubscribed channels, search shutdown checkpoints, and web
+search resumption after Help and Unsubscribe dialogs:
 
 ```powershell
 dotnet run --project Tests\Wpf\ScrollbarVerification.csproj
+```
+
+With Node.js installed, verify web player loading failures, retry, close-during-load,
+and stale-session handling without contacting YouTube:
+
+```powershell
+node --test Tests\player.test.mjs
+```
+
+Verify desktop close-during-initialization and web playback session lifecycle:
+
+```powershell
+dotnet run --project PlaybackTests\PlaybackVerification.csproj
 ```
 
 To exercise the LAN model with six synthetic examples (no cloud fallback):

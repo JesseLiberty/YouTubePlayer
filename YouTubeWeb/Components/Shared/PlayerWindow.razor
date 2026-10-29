@@ -9,7 +9,16 @@
             <span class="window-title">@session.Title</span>
             <button class="window-close player-close" title="Close (Esc)" @onclick="Close">&#x2715;</button>
         </div>
-        <div class="player-host" @ref="_host"></div>
+        @if (session.Error is { } error)
+        {
+            <div role="alert" style="color: white; background: #202020; padding: 1rem;">
+                <p>@error</p>
+                <button @onclick="Retry">Retry</button>
+                <a href="@($"https://www.youtube.com/watch?v={Uri.EscapeDataString(session.VideoId)}")"
+                   target="_blank" rel="noopener noreferrer" style="color: #9ecbff;">Open on YouTube</a>
+            </div>
+        }
+        <div class="player-host" @key="session.Id" @ref="_host"></div>
     </div>
 }
 
@@ -17,61 +26,104 @@
     private Session? _session;
     private ElementReference _window;
     private ElementReference _host;
-    private IJSObjectReference? _module;
-    private IJSObjectReference? _player;
+    private Task<IJSObjectReference>? _moduleTask;
     private DotNetObjectReference<PlayerWindow>? _self;
     private bool _startPending;
+    private bool _disposed;
 
     /// <summary>Plays a video and completes when it ends or the player is closed.</summary>
-    public Task<PlayerResult> PlayAsync(string videoId, string title, int startPositionSeconds)
+    public async Task<PlayerResult> PlayAsync(string videoId, string title, int startPositionSeconds)
     {
-        _session?.Completion.TrySetResult(new PlayerResult(_session.WatchLevel, _session.PositionSeconds));
-        _session = new Session(videoId, title, startPositionSeconds);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var previous = _session;
+        var session = new Session(videoId, title, startPositionSeconds);
+        _session = session;
         _startPending = true;
         StateHasChanged();
-        return _session.Completion.Task;
+        if (previous is not null)
+        {
+            Complete(previous);
+            await StopPlayerAsync(previous);
+        }
+        return await session.Completion.Task;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_startPending || _session is not { } session) return;
+        if (_disposed || !_startPending || _session is not { } session) return;
         _startPending = false;
+        var id = session.Id;
+        session.Host = _host;
 
-        await _window.FocusAsync();
-        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/player.js");
-        _self ??= DotNetObjectReference.Create(this);
-        var player = await _module.InvokeAsync<IJSObjectReference>(
-            "open", _host, session.VideoId, session.StartPositionSeconds, _self);
+        try
+        {
+            await _window.FocusAsync();
+            if (!IsCurrent(session, id)) return;
+            _moduleTask ??= JS.InvokeAsync<IJSObjectReference>("import", "./js/player.js").AsTask();
+            var module = await _moduleTask;
+            if (!IsCurrent(session, id)) return;
+            _self ??= DotNetObjectReference.Create(this);
+            var player = await module.InvokeAsync<IJSObjectReference>(
+                "open", session.Host, session.VideoId, session.PositionSeconds ?? session.StartPositionSeconds, _self, id);
+            if (IsCurrent(session, id))
+                session.Player = player;
+            else
+                await DisposePlayerAsync(player);
+        }
+        catch (Exception ex) when (ex is JSException or OperationCanceledException or ObjectDisposedException)
+        {
+            if (_moduleTask?.IsCompletedSuccessfully == false) _moduleTask = null;
+            if (IsCurrent(session, id))
+                OnError(id, "The video player could not start. Check your connection, then retry or open it on YouTube.");
+        }
+    }
 
-        if (ReferenceEquals(_session, session))
-            _player = player;
-        else
-            await DisposePlayerAsync(player);
+    private bool IsCurrent(Session session, string id) =>
+        !_disposed && ReferenceEquals(_session, session) && session.Id == id;
+
+    [JSInvokable]
+    public void OnPosition(string sessionId, int positionSeconds)
+    {
+        if (_session is { } session && session.Id == sessionId) session.PositionSeconds = positionSeconds;
     }
 
     [JSInvokable]
-    public void OnPosition(int positionSeconds)
+    public void OnStarted(string sessionId)
     {
-        if (_session is { } session) session.PositionSeconds = positionSeconds;
+        if (_session is { WatchLevel: < WatchLevel.Started } session && session.Id == sessionId) session.WatchLevel = WatchLevel.Started;
     }
 
     [JSInvokable]
-    public void OnStarted()
+    public void OnWatched(string sessionId)
     {
-        if (_session is { WatchLevel: < WatchLevel.Started } session) session.WatchLevel = WatchLevel.Started;
+        if (_session is { } session && session.Id == sessionId) session.WatchLevel = WatchLevel.Watched;
     }
 
     [JSInvokable]
-    public void OnWatched()
+    public async Task OnEnded(string sessionId, int durationSeconds)
     {
-        if (_session is { } session) session.WatchLevel = WatchLevel.Watched;
-    }
-
-    [JSInvokable]
-    public async Task OnEnded(int durationSeconds)
-    {
-        if (_session is { } session && durationSeconds >= 0) session.PositionSeconds = durationSeconds;
+        if (_session is not { } session || session.Id != sessionId) return;
+        if (durationSeconds >= 0) session.PositionSeconds = durationSeconds;
         await Close();
+    }
+
+    [JSInvokable]
+    public void OnError(string sessionId, string message)
+    {
+        if (_disposed || _session is not { } session || session.Id != sessionId) return;
+        session.Error = message;
+        StateHasChanged();
+    }
+
+    private async Task Retry()
+    {
+        if (_session is not { Error: not null } session) return;
+        session.Error = null;
+        await StopPlayerAsync(session);
+        if (_disposed || !ReferenceEquals(_session, session)) return;
+        session.Id = Guid.NewGuid().ToString("N");
+        _startPending = true;
+        StateHasChanged();
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -84,11 +136,27 @@
         if (_session is not { } session) return;
 
         _session = null;
-        var player = _player;
-        _player = null;
+        _startPending = false;
+        Complete(session);
         StateHasChanged();
-        await DisposePlayerAsync(player);
+        await StopPlayerAsync(session);
+    }
+
+    private static void Complete(Session session) =>
         session.Completion.TrySetResult(new PlayerResult(session.WatchLevel, session.PositionSeconds));
+
+    private async Task StopPlayerAsync(Session session)
+    {
+        var player = session.Player;
+        session.Player = null;
+        try
+        {
+            // Cancel even when the JS handle's interop response is still in flight.
+            if (_moduleTask is { IsCompletedSuccessfully: true } module)
+                await module.Result.InvokeVoidAsync("close", session.Host, session.Id);
+        }
+        catch (Exception ex) when (ex is JSException or OperationCanceledException or ObjectDisposedException) { }
+        finally { await DisposePlayerAsync(player); }
     }
 
     private static async Task DisposePlayerAsync(IJSObjectReference? player)
@@ -97,28 +165,42 @@
         try
         {
             await player.InvokeVoidAsync("dispose");
-            await player.DisposeAsync();
         }
-        catch (JSDisconnectedException)
+        catch (Exception ex) when (ex is JSException or OperationCanceledException or ObjectDisposedException) { }
+        finally
         {
+            try { await player.DisposeAsync(); }
+            catch (Exception ex) when (ex is JSException or OperationCanceledException or ObjectDisposedException) { }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        _session?.Completion.TrySetResult(new PlayerResult(_session.WatchLevel, _session.PositionSeconds));
-        await DisposePlayerAsync(_player);
-        if (_module is not null)
+        if (_disposed) return;
+        _disposed = true;
+        var session = _session;
+        _session = null;
+        _startPending = false;
+        if (session is not null)
         {
-            try { await _module.DisposeAsync(); }
-            catch (JSDisconnectedException) { }
+            Complete(session);
+            await StopPlayerAsync(session);
         }
         _self?.Dispose();
+        if (_moduleTask is { } pending)
+        {
+            try { await (await pending).DisposeAsync(); }
+            catch (Exception ex) when (ex is JSException or OperationCanceledException or ObjectDisposedException) { }
+        }
     }
 
     private sealed class Session(string videoId, string title, int startPositionSeconds)
     {
         public string VideoId { get; } = videoId;
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string? Error { get; set; }
+        public ElementReference Host { get; set; }
+        public IJSObjectReference? Player { get; set; }
         public string Title { get; } = title;
         public int StartPositionSeconds { get; } = startPositionSeconds;
         public WatchLevel WatchLevel { get; set; }

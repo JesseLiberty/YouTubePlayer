@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="..\Shared\AiVideoClassifier.cs" Link="Services\AiVideoClassifier.cs" />
     <Compile Include="..\Shared\AiVideoKeywords.cs" Link="Services\AiVideoKeywords.cs" />
+    <Compile Include="..\Shared\JsonFileStore.cs" Link="Services\JsonFileStore.cs" />
     <PackageReference Include="Google.Apis.YouTube.v3" Version="1.77.0.4302" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>

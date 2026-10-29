@@ -57,6 +57,8 @@ public partial class PlayerWindow : Window
 
   private readonly string _videoId;
   private readonly int _startPositionSeconds;
+  private bool _closed;
+  private bool _initializing;
 
   public WatchLevel WatchLevel { get; private set; }
   public int? PositionSeconds { get; private set; }
@@ -68,17 +70,24 @@ public partial class PlayerWindow : Window
     _startPositionSeconds = startPositionSeconds;
     Title = title;
     Loaded += OnLoaded;
-    Closed += (_, _) => WebView.Dispose();
+    Closed += (_, _) =>
+    {
+      _closed = true;
+      if (!_initializing) WebView.Dispose();
+    };
   }
 
   private async void OnLoaded(object sender, RoutedEventArgs e)
   {
+    if (_closed || _initializing) return;
+    Loaded -= OnLoaded;
+    _initializing = true;
     try
     {
-      s_environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(
-          Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YouTubePlayer", "WebView2"));
-
-      await WebView.EnsureCoreWebView2Async(await s_environment);
+      var environment = await GetEnvironmentAsync();
+      if (_closed) return;
+      await WebView.EnsureCoreWebView2Async(environment);
+      if (_closed) return;
       var core = WebView.CoreWebView2;
 
       core.WebMessageReceived += (_, args) =>
@@ -95,15 +104,44 @@ public partial class PlayerWindow : Window
         else if (message == "ended") Close();
       };
       await core.AddScriptToExecuteOnDocumentCreatedAsync(EndedScript);
+      if (_closed) return;
 
       var startTime = _startPositionSeconds > 0 ? $"&t={_startPositionSeconds}s" : "";
       core.Navigate($"https://www.youtube.com/watch?v={Uri.EscapeDataString(_videoId)}{startTime}");
     }
     catch (WebView2RuntimeNotFoundException)
     {
+      if (_closed) return;
       MessageBox.Show(this, "The Microsoft Edge WebView2 Runtime is required to play videos.",
           "WebView2 missing", MessageBoxButton.OK, MessageBoxImage.Error);
       Close();
+    }
+    catch (Exception ex)
+    {
+      if (_closed) return;
+      MessageBox.Show(this, $"The video player could not start. Close this window and try opening the video again.\n\n{ex.Message}",
+          "Playback unavailable", MessageBoxButton.OK, MessageBoxImage.Error);
+      Close();
+    }
+    finally
+    {
+      _initializing = false;
+      if (_closed) WebView.Dispose();
+    }
+  }
+
+  private static async Task<CoreWebView2Environment> GetEnvironmentAsync()
+  {
+    var pending = s_environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YouTubePlayer", "WebView2"));
+    try
+    {
+      return await pending;
+    }
+    catch
+    {
+      if (ReferenceEquals(s_environment, pending)) s_environment = null;
+      throw;
     }
   }
 }

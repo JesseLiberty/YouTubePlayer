@@ -29,6 +29,11 @@ internal static class Program
         var window = new MainWindow();
         try
         {
+            var detached = new SeriesColumn { SubscriptionId = "removed", ChannelId = "removed", Title = "Removed channel" };
+            typeof(MainWindow).GetMethod("ApplyLoadedVideos", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(window, [detached, new[] { new VideoItem { VideoId = "removed-video", Title = "Removed video" } }]);
+            Require(detached.Videos.Count == 0, "A removed column accepted pending load results.");
+            Console.WriteLine("PASS: desktop ignores video loads for unsubscribed columns.");
             var items = (ItemsControl)window.FindName("SeriesItems");
             var columns = Enumerable.Range(0, 12).Select(i => new SeriesColumn
             {
@@ -78,6 +83,9 @@ internal static class Program
                 .GetField("_pendingSearches", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
             var olderSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var currentSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var pendingSync = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            typeof(MainWindow).GetField("_syncTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(window, pendingSync.Task);
             pending.Add(olderSave.Task);
             pending.Add(currentSave.Task);
             var closed = false;
@@ -90,9 +98,15 @@ internal static class Program
             PumpUntil(() => currentSave.Task.IsCompleted && pending.All(task => task.IsCompleted || task == olderSave.Task));
             Require(!closed, "Window ignored an older search's pending cancellation save.");
             olderSave.SetResult();
+            PumpUntil(() => pending.All(task => task.IsCompleted));
+            Require(!closed, "Window closed before its Sync completed.");
+            var lifetime = (CancellationTokenSource)typeof(MainWindow)
+                .GetField("_lifetime", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+            Require(lifetime.IsCancellationRequested, "Closing did not cancel Sync.");
+            pendingSync.SetResult();
             PumpUntil(() => closed);
             Require(closed, "Window did not close after all search saves completed.");
-            Console.WriteLine("PASS: desktop closing waits for current and previously cancelled search saves.");
+            Console.WriteLine("PASS: desktop closing cancels Sync and waits for Sync and all search saves.");
         }
         finally
         {
