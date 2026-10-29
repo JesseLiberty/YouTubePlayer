@@ -79,9 +79,10 @@ public sealed class AiVideoClassifier
         Func<string, Dictionary<string, AiClassification>> loadCache,
         Action<string, Dictionary<string, AiClassification>> saveCache,
         Action<string, IReadOnlyDictionary<string, double>> onUpdated,
-        Func<string, Task<bool>> confirmCloud) =>
+        Func<string, Task<bool>> confirmCloud,
+        CancellationToken ct = default) =>
         ClassifyPreferLocalAsync(videos, loadCache, saveCache, onUpdated, confirmCloud,
-            () => CreateLocalAsync(), () => new AiVideoClassifier());
+            () => CreateLocalAsync(ct), () => new AiVideoClassifier(), ct);
 
     internal static async Task<bool> ClassifyPreferLocalAsync(
         IEnumerable<VideoClassificationInput> videos,
@@ -90,8 +91,10 @@ public sealed class AiVideoClassifier
         Action<string, IReadOnlyDictionary<string, double>> onUpdated,
         Func<string, Task<bool>> confirmCloud,
         Func<Task<AiVideoClassifier>> createLocal,
-        Func<AiVideoClassifier> createCloud)
+        Func<AiVideoClassifier> createCloud,
+        CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var inputs = videos.ToArray();
         if (inputs.Length == 0)
             return true;
@@ -102,7 +105,7 @@ public sealed class AiVideoClassifier
             {
                 saveCache(classifier.CacheFileName, cache);
                 onUpdated(classifier.DisplayName, results);
-            });
+            }, ct);
         }
 
         try
@@ -110,10 +113,12 @@ public sealed class AiVideoClassifier
             await RunAsync(await createLocal());
             return true;
         }
-        catch (LocalModelUnavailableException ex)
+        catch (LocalModelUnavailableException ex) when (!ct.IsCancellationRequested)
         {
+            ct.ThrowIfCancellationRequested();
             if (!await confirmCloud(ex.Message)) return false;
         }
+        ct.ThrowIfCancellationRequested();
         await RunAsync(createCloud());
         return true;
     }

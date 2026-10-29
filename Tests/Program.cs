@@ -6,12 +6,19 @@ using YouTube.Shared;
 using DesktopVideo = YouTubePlayer.Models.VideoItem;
 using WebVideo = YouTubeWeb.Models.VideoItem;
 
+if (args.Length > 0 && args[0] == PersistenceVerification.WorkerFlag)
+{
+    PersistenceVerification.RunWorker(args);
+    return;
+}
+
 if (args.Contains("--live") || args.Contains("--live-local"))
 {
     await VerifyLiveAsync(args.Contains("--live-local"));
     return;
 }
 
+PersistenceVerification.Run();
 VerifyMarkers();
 VerifyKeywords();
 await VerifyCacheAndBatchesAsync();
@@ -21,8 +28,33 @@ await VerifySearchCheckpointsAsync();
 await VerifyConcurrentSearchesAsync();
 await VerifyInvalidResponsesAsync();
 await VerifyLocalAndFallbackAsync();
+await VerifyClassificationCancellationAsync();
 await VerifyProgressiveLocalAsync();
 Console.WriteLine("PASS: thresholds, caching, batching, response validation, local discovery, and consent-gated fallback/exit.");
+
+static async Task VerifyClassificationCancellationAsync()
+{
+    using var cancellation = new CancellationTokenSource();
+    using var handler = new CancellationHandler();
+    using var http = new HttpClient(handler);
+    var cloud = new AiVideoClassifier(http, "test-key");
+    var operation = AiVideoClassifier.ClassifyPreferLocalAsync(
+        [new VideoClassificationInput("cancel-test", "Test", "")],
+        _ => [], (_, _) => { }, (_, _) => { }, _ => Task.FromResult(true),
+        () => Task.FromException<AiVideoClassifier>(new LocalModelUnavailableException("Test unavailable")),
+        () => cloud, cancellation.Token);
+    await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    cancellation.Cancel();
+    try
+    {
+        await operation.WaitAsync(TimeSpan.FromSeconds(5));
+        throw new InvalidOperationException("Classification did not honor lifetime cancellation.");
+    }
+    catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+    {
+    }
+    Console.WriteLine("PASS: Sync classification cancels an in-flight model request.");
+}
 
 static void Assert(bool condition, string message)
 {
@@ -726,6 +758,18 @@ static async Task VerifyLiveAsync(bool localModel)
         Assert((probability > 0.8) == expected[sample.VideoId], $"Unexpected semantic result: {sample.VideoId}");
     }
     Console.WriteLine($"PASS: live {classifier.DisplayName} semantic classification of six synthetic videos.");
+}
+
+sealed class CancellationHandler : HttpMessageHandler
+{
+    public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Started.TrySetResult();
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        throw new InvalidOperationException("An infinite delay completed without cancellation.");
+    }
 }
 
 sealed class NetworkHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> respond) : HttpMessageHandler

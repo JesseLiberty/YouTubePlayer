@@ -9,7 +9,7 @@ using YouTube.Shared;
 
 namespace YouTubeWeb.Components.Pages;
 
-public partial class Home : IDisposable
+public partial class Home : IDisposable, IAsyncDisposable
 {
     private const string HiddenVideosFile = "hidden-videos.json";
     private const string ColumnOrderFile = "column-order.json";
@@ -32,13 +32,13 @@ public partial class Home : IDisposable
         Title = "Important",
         IsImportantColumn = true,
     };
-    private readonly HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
-    private readonly HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
-    private readonly HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
-    private readonly HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
-    private readonly Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
-    private readonly HashSet<string> _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
-    private readonly Dictionary<string, List<string>> _videoOrder = LocalStore.Load<Dictionary<string, List<string>>>(VideoOrderFile) ?? [];
+    private HashSet<string> _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
+    private HashSet<string> _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
+    private HashSet<string> _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
+    private HashSet<string> _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
+    private Dictionary<string, int> _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
+    private HashSet<string> _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
+    private Dictionary<string, List<string>> _videoOrder = LocalStore.Load<Dictionary<string, List<string>>>(VideoOrderFile) ?? [];
     private readonly HashSet<SeriesColumn> _unsubscribing = [];
 
     private PlayerWindow _player = default!;
@@ -51,6 +51,9 @@ public partial class Home : IDisposable
     private CancellationTokenSource? _semanticSearchCancellation;
     private bool _syncing;
     private bool _disposed;
+    private readonly CancellationTokenSource _lifetime = new();
+    private Task _syncTask = Task.CompletedTask;
+    private readonly List<Task> _pendingSearches = [];
     private VideoItem? _selectedVideo;
     private SeriesColumn? _dragColumn;
     private VideoDrag? _activeVideoDrag;
@@ -96,7 +99,8 @@ public partial class Home : IDisposable
 
         var cancellation = new CancellationTokenSource();
         _semanticSearchCancellation = cancellation;
-        _ = SearchSemanticallyAsync(query, cancellation);
+        _pendingSearches.RemoveAll(task => task.IsCompletedSuccessfully);
+        _pendingSearches.Add(SearchSemanticallyAsync(query, cancellation));
     }
 
     private async Task SearchSemanticallyAsync(string query, CancellationTokenSource cancellation)
@@ -132,7 +136,7 @@ public partial class Home : IDisposable
                     var answer = await _messageBox.ShowAsync(
                         $"{error}\n\nUse gpt-5-mini through OpenAI for semantic search instead? This sends the search query, " +
                         "video titles, and descriptions to OpenAI and may incur API charges.",
-                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question).WaitAsync(token);
                     return answer == MessageBoxResult.Yes;
                 },
                 token);
@@ -152,31 +156,46 @@ public partial class Home : IDisposable
             _semanticSearchMatches.Clear();
             _searchStatusText = "Semantic search failed; keyword matches remain.";
             await InvokeAsync(StateHasChanged);
-            await _messageBox.ShowAsync(ex.Message, "Semantic search failed",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            try
+            {
+                await _messageBox.ShowAsync(ex.Message, "Semantic search failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error).WaitAsync(token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
         }
         finally
         {
             if (ReferenceEquals(_semanticSearchCancellation, cancellation))
             {
                 _semanticSearchCancellation = null;
-                cancellation.Dispose();
             }
+            cancellation.Dispose();
         }
     }
 
     private void CancelSemanticSearch()
     {
         _semanticSearchCancellation?.Cancel();
-        _semanticSearchCancellation?.Dispose();
         _semanticSearchCancellation = null;
         _searchStatusText = "";
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
         _disposed = true;
+        _lifetime.Cancel();
         CancelSemanticSearch();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        await _syncTask;
+        await Task.WhenAll(_pendingSearches);
+        _lifetime.Dispose();
     }
 
     private async Task HelpButton_Click()
@@ -209,8 +228,16 @@ public partial class Home : IDisposable
         }
     }
 
-    private async Task SyncButton_Click()
+    private Task SyncButton_Click()
     {
+        if (_syncing || _disposed) return Task.CompletedTask;
+        _syncTask = SyncAsync();
+        return _syncTask;
+    }
+
+    private async Task SyncAsync()
+    {
+        var token = _lifetime.Token;
         CancelSemanticSearch();
         _semanticSearchMatches.Clear();
         ClearUndo();
@@ -219,7 +246,15 @@ public partial class Home : IDisposable
         try
         {
             SetStatus("Signing in and loading subscriptions...");
-            var subscriptions = await Client.GetSubscriptionsAsync();
+            _hiddenVideoIds = LocalStore.Load<HashSet<string>>(HiddenVideosFile) ?? [];
+            _watchedVideoIds = LocalStore.Load<HashSet<string>>(WatchedVideosFile) ?? [];
+            _startedVideoIds = LocalStore.Load<HashSet<string>>(StartedVideosFile) ?? [];
+            _knownVideoIds = LocalStore.Load<HashSet<string>>(KnownVideosFile) ?? [];
+            _videoPositions = LocalStore.Load<Dictionary<string, int>>(VideoPositionsFile) ?? [];
+            _importantVideoIds = LocalStore.Load<HashSet<string>>(ImportantVideosFile) ?? [];
+            _videoOrder = LocalStore.Load<Dictionary<string, List<string>>>(VideoOrderFile) ?? [];
+            var subscriptions = await Client.GetSubscriptionsAsync(token);
+            token.ThrowIfCancellationRequested();
 
             _series.Clear();
             _importantColumn.Videos.Clear();
@@ -233,7 +268,7 @@ public partial class Home : IDisposable
                 _series.Add(new SeriesColumn { SubscriptionId = s.SubscriptionId, ChannelId = s.ChannelId, Title = s.Title });
 
             SetStatus($"Loading videos for {_series.Count} series...");
-            var uploads = await Client.GetUploadsPlaylistIdsAsync(_series.Select(c => c.ChannelId));
+            var uploads = await Client.GetUploadsPlaylistIdsAsync(_series.Select(c => c.ChannelId), token);
 
             using var throttle = new SemaphoreSlim(6);
             var loaded = 0;
@@ -241,20 +276,12 @@ public partial class Home : IDisposable
             await Task.WhenAll(_series.ToList().Select(async column =>
             {
                 if (!uploads.TryGetValue(column.ChannelId, out var playlistId)) return;
-                await throttle.WaitAsync();
+                await throttle.WaitAsync(token);
                 try
                 {
-                    foreach (var video in await Client.GetVideosAsync(playlistId))
-                        if (!_hiddenVideoIds.Contains(video.VideoId))
-                        {
-                            video.WatchLevel = GetWatchLevel(video.VideoId);
-                            video.IsImportant = _importantVideoIds.Contains(video.VideoId);
-                            video.IsNew = !_knownVideoIds.Contains(video.VideoId);
-                            video.PositionSeconds = _videoPositions.GetValueOrDefault(video.VideoId);
-                            column.Videos.Add(video);
-                            if (video.IsImportant)
-                                _importantColumn.Videos.Add(video);
-                        }
+                    var loadedVideos = await Client.GetVideosAsync(playlistId, token);
+                    token.ThrowIfCancellationRequested();
+                    ApplyLoadedVideos(column, loadedVideos);
                 }
                 finally
                 {
@@ -266,8 +293,8 @@ public partial class Home : IDisposable
             foreach (var column in _series.Append(_importantColumn))
                 RestoreVideoOrder(column);
 
-            _knownVideoIds.UnionWith(_series.SelectMany(column => column.Videos).Select(video => video.VideoId));
-            LocalStore.Save(KnownVideosFile, _knownVideoIds);
+            _knownVideoIds = LocalStore.Union(KnownVideosFile,
+                _series.SelectMany(column => column.Videos).Select(video => video.VideoId));
             classifying = true;
             SetStatus("Connecting to the local AI model...");
             var videos = _series.SelectMany(column => column.Videos).DistinctBy(v => v.VideoId).ToArray();
@@ -283,12 +310,13 @@ public partial class Home : IDisposable
                 },
                 async error =>
                 {
+                    token.ThrowIfCancellationRequested();
                     var answer = await _messageBox.ShowAsync(
                         $"{error}\n\nUse gpt-5-mini through OpenAI instead? This sends video titles and descriptions " +
                         "to OpenAI and may incur API charges.\n\nYes: use gpt-5-mini for this Sync.\nNo: exit this Sync and keep loaded videos.",
-                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        "Local AI model unavailable", MessageBoxButtons.YesNo, MessageBoxIcon.Question).WaitAsync(token);
                     return answer == MessageBoxResult.Yes;
-                });
+                }, token);
             if (!completed)
             {
                 SetStatus("Sync stopped. Loaded videos have been kept.");
@@ -296,11 +324,21 @@ public partial class Home : IDisposable
             }
             _statusText = $"Synced {_series.Count} series at {DateTime.Now:t}.";
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
+            if (_disposed) return;
             SetStatus(classifying ? "Videos loaded; AI classification failed." : "Sync failed.");
-            await _messageBox.ShowAsync(ex.Message, classifying ? "AI classification failed" : "Sync failed",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            try
+            {
+                await _messageBox.ShowAsync(ex.Message, classifying ? "AI classification failed" : "Sync failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error).WaitAsync(token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
         }
         finally
         {
@@ -311,8 +349,24 @@ public partial class Home : IDisposable
 
     private void SetStatus(string text)
     {
+        if (_disposed) return;
         _statusText = text;
         StateHasChanged();
+    }
+
+    private void ApplyLoadedVideos(SeriesColumn column, IEnumerable<VideoItem> videos)
+    {
+        if (_disposed || !_series.Contains(column)) return;
+        foreach (var video in videos)
+        {
+            if (_hiddenVideoIds.Contains(video.VideoId)) continue;
+            video.WatchLevel = GetWatchLevel(video.VideoId);
+            video.IsImportant = _importantVideoIds.Contains(video.VideoId);
+            video.IsNew = !_knownVideoIds.Contains(video.VideoId);
+            video.PositionSeconds = _videoPositions.GetValueOrDefault(video.VideoId);
+            column.Videos.Add(video);
+            if (video.IsImportant) _importantColumn.Videos.Add(video);
+        }
     }
 
     private async Task Unsubscribe_Click(SeriesColumn column)
@@ -360,12 +414,11 @@ public partial class Home : IDisposable
 
         var index = column.Videos.IndexOf(video);
         var importantIndex = _importantColumn.Videos.IndexOf(video);
+        if (!TrySaveState(() => _hiddenVideoIds = LocalStore.SetMembership(HiddenVideosFile, video.VideoId, true))) return;
         column.Videos.RemoveAt(index);
         _importantColumn.Videos.Remove(video);
         if (ReferenceEquals(_selectedVideo, video))
             _selectedVideo = null;
-        _hiddenVideoIds.Add(video.VideoId);
-        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
         _removedVideo = (video, column, index, importantIndex);
         _statusText = $"Removed \"{video.Title}\".";
     }
@@ -374,8 +427,7 @@ public partial class Home : IDisposable
     {
         if (_removedVideo is not { } removed) return;
 
-        _hiddenVideoIds.Remove(removed.Video.VideoId);
-        LocalStore.Save(HiddenVideosFile, _hiddenVideoIds);
+        if (!TrySaveState(() => _hiddenVideoIds = LocalStore.SetMembership(HiddenVideosFile, removed.Video.VideoId, false))) return;
         removed.Column.Videos.Insert(Math.Min(removed.Index, removed.Column.Videos.Count), removed.Video);
         if (removed.ImportantIndex >= 0)
             _importantColumn.Videos.Insert(
@@ -404,7 +456,11 @@ public partial class Home : IDisposable
         if (oldIndex < 0 || newIndex < 0) return;
 
         _series.Move(oldIndex, newIndex);
-        LocalStore.Save(ColumnOrderFile, _series.Select(c => c.ChannelId).ToList());
+        if (!TrySaveState(() => LocalStore.Save(ColumnOrderFile, _series.Select(c => c.ChannelId).ToList())))
+        {
+            _series.Move(newIndex, oldIndex);
+            return;
+        }
         _statusText = $"Moved {source.Title}.";
     }
 
@@ -423,6 +479,8 @@ public partial class Home : IDisposable
     private void ToggleImportance(VideoItem video)
     {
         ClearUndo();
+        if (!TrySaveState(() => _importantVideoIds =
+                LocalStore.SetMembership(ImportantVideosFile, video.VideoId, !video.IsImportant))) return;
         video.IsImportant = !video.IsImportant;
         if (video.IsImportant)
         {
@@ -434,7 +492,6 @@ public partial class Home : IDisposable
             _importantVideoIds.Remove(video.VideoId);
             _importantColumn.Videos.Remove(video);
         }
-        LocalStore.Save(ImportantVideosFile, _importantVideoIds);
     }
 
     private void Video_Click(VideoItem video)
@@ -459,7 +516,11 @@ public partial class Home : IDisposable
         if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex) return;
 
         column.Videos.Move(oldIndex, newIndex);
-        SaveVideoOrder(column);
+        if (!TrySaveState(() => SaveVideoOrder(column)))
+        {
+            column.Videos.Move(newIndex, oldIndex);
+            return;
+        }
         _statusText = $"Moved \"{source.Video.Title}\".";
     }
 
@@ -480,8 +541,8 @@ public partial class Home : IDisposable
 
     private void SaveVideoOrder(SeriesColumn column)
     {
-        _videoOrder[GetVideoOrderKey(column)] = column.Videos.Select(video => video.VideoId).ToList();
-        LocalStore.Save(VideoOrderFile, _videoOrder);
+        _videoOrder = LocalStore.SetValue(VideoOrderFile, GetVideoOrderKey(column),
+            column.Videos.Select(video => video.VideoId).ToList());
     }
 
     private static string GetVideoOrderKey(SeriesColumn column) =>
@@ -532,17 +593,33 @@ public partial class Home : IDisposable
         // Modal: control returns here when the video ends or the player is closed.
         var result = await _player.PlayAsync(video.VideoId, video.Title, startPositionSeconds);
 
-        if (result.WatchLevel >= WatchLevel.Started && _startedVideoIds.Add(video.VideoId))
-            LocalStore.Save(StartedVideosFile, _startedVideoIds);
-        if (result.WatchLevel == WatchLevel.Watched && _watchedVideoIds.Add(video.VideoId))
-            LocalStore.Save(WatchedVideosFile, _watchedVideoIds);
-        if (result.PositionSeconds is int positionSeconds)
+        TrySaveState(() =>
         {
-            _videoPositions[video.VideoId] = positionSeconds;
-            LocalStore.Save(VideoPositionsFile, _videoPositions);
-            video.PositionSeconds = positionSeconds;
-        }
+            if (result.WatchLevel >= WatchLevel.Started)
+                _startedVideoIds = LocalStore.SetMembership(StartedVideosFile, video.VideoId, true);
+            if (result.WatchLevel == WatchLevel.Watched)
+                _watchedVideoIds = LocalStore.SetMembership(WatchedVideosFile, video.VideoId, true);
+            if (result.PositionSeconds is int positionSeconds)
+            {
+                _videoPositions = LocalStore.SetValue(VideoPositionsFile, video.VideoId, positionSeconds);
+                video.PositionSeconds = positionSeconds;
+            }
+        });
         video.WatchLevel = GetWatchLevel(video.VideoId);
+    }
+
+    private bool TrySaveState(Action save)
+    {
+        try
+        {
+            save();
+            return true;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Text.Json.JsonException or TimeoutException)
+        {
+            _statusText = $"Could not save changes: {ex.Message}";
+            return false;
+        }
     }
 
     private WatchLevel GetWatchLevel(string videoId) =>

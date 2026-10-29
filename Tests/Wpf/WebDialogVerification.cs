@@ -25,7 +25,26 @@ internal static class WebDialogVerification
         await VerifyAsync("Unsubscribe_Click", MessageBoxResult.No);
         await VerifyAsync("Unsubscribe_Click", MessageBoxResult.Yes);
         await VerifyAsync("Unsubscribe_Click", MessageBoxResult.Yes, fail: true);
+        await VerifyDisposalAsync();
         Console.WriteLine("PASS: web search resumes after Help and declined/successful/failed Unsubscribe.");
+    }
+
+    private static async Task VerifyDisposalAsync()
+    {
+        var home = new Home();
+        var detached = new SeriesColumn { SubscriptionId = "removed", ChannelId = "removed", Title = "Removed channel" };
+        Invoke(home, "ApplyLoadedVideos",
+            [detached, new[] { new VideoItem { VideoId = "removed-video", Title = "Removed video" } }]);
+        Require(detached.Videos.Count == 0, "Web accepted pending load results for an unsubscribed column.");
+        var pendingSync = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Set(home, "_syncTask", pendingSync.Task);
+        var lifetime = (CancellationTokenSource)Get(home, "_lifetime")!;
+        var disposal = home.DisposeAsync().AsTask();
+        Require(lifetime.IsCancellationRequested, "Web disposal did not cancel Sync.");
+        Require(!disposal.IsCompleted, "Web disposal did not wait for Sync.");
+        pendingSync.SetResult();
+        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        Console.WriteLine("PASS: web disposal cancels and drains pending Sync.");
     }
 
     private static async Task VerifyAsync(string method, MessageBoxResult answer, bool fail = false)

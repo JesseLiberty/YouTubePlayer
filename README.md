@@ -68,6 +68,8 @@ dotnet run --project YouTubePlayer
 
 Videos open in a normal, resizable 1280 x 800 window, centered on the main window.
 Use the window's maximize button to enlarge it when desired.
+Closing a player while its browser is still initializing is supported; initialization
+failures are shown as playback errors rather than terminating the application.
 
 ### Web (ASP.NET Core Blazor)
 
@@ -78,6 +80,10 @@ dotnet run --project YouTubeWeb --launch-profile http
 ```
 
 Then browse to `http://localhost:5013`.
+
+The web player reports YouTube API loading failures and unavailable or
+non-embeddable videos in its playback overlay, with Retry and Open on YouTube
+actions.
 
 ## AI video labels
 
@@ -120,7 +126,12 @@ arrives at least two seconds after the last checkpoint. Remaining scores are sav
 on completion, cancellation, or failure; cards still update as each result arrives.
 
 Closing the desktop window waits for pending searches to finish their cancellation
-checkpoints before exiting. In the web app, Help and Unsubscribe pause semantic
+checkpoints before exiting. It also cancels and waits for an active Sync, including
+subscription requests and model inference. Leaving the web page cancels and drains
+its Sync and searches. Videos returned for a channel that was unsubscribed while
+Sync was loading are discarded.
+
+In the web app, Help and Unsubscribe pause semantic
 search while their dialogs are open and resume the current query afterward,
 including when unsubscribe is declined or fails.
 
@@ -142,6 +153,19 @@ fallback, which may incur API charges. OpenAI credentials are never sent to the 
 ## Accounts, data, and limitations
 
 * **Local storage:** Both apps save tokens and video state in `%LOCALAPPDATA%\YouTubePlayer` on Windows. They share that storage when run under the same Windows account. Separate Windows users or computers have separate local data.
+
+Hidden/important flags, watch history, per-video positions, and per-column video order
+are updated against the latest saved data under a cross-process lock, so another app
+instance or browser tab does not overwrite unrelated changes. Sync reloads saved
+state before loading videos. Changes in another instance are reflected on the next
+Sync, rather than pushed live.
+
+State files are replaced atomically and retain a `.bak` recovery copy. Invalid JSON
+is preserved rather than silently treated as empty state. Save failures are reported
+in the app; failed hide, importance, and reorder actions are not presented as saved.
+A valid backup is restored automatically, with a trace warning. If neither copy is
+valid, loading reports an error instead of resetting saved state; damaged content
+is preserved in a `.corrupt-<hash>` file.
 * **YouTube account changes:** Unsubscribing changes the subscriptions of the Google/YouTube account currently signed in. The apps request YouTube permissions that allow subscription management.
 * **Local-only web sign-in:** The web app uses Desktop OAuth and opens a sign-in browser on the machine running the server. It is not a multi-user hosted service. Hosting it for independent users requires Web application OAuth and per-user authentication and storage.
 * **Embedded playback:** The web app uses the YouTube IFrame API. Videos whose owners disable embedding cannot play in its embedded player.
