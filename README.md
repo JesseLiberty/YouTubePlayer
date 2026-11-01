@@ -9,6 +9,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Displays your progress and total time for video, along with date and other meta-data
 * Search matches titles and summaries by keywords or semantic relevance
 * Single click on card displays details
+* Single click on url copies url to clipboard
 * If details contain chapters, clicking on a chapter brings you there
 * Double-click on video and go to where you left off
 * Mark videos as important (and see all important videos listed together)
@@ -88,7 +89,7 @@ actions.
 ## AI video labels
 
 Both apps classify loaded, non-hidden videos during Sync using the Qwen3.8-Flash-Next
-model served by llama.cpp at `http://192.168.1.151:11434`. The app discovers its full
+model served by llama.cpp. The app discovers its full
 model ID using `/v1/models` and calls `/v1/chat/completions`. This is a Qwen model
 running on a llama.cpp server, not a Meta Llama model. Keep the server available on
 your trusted LAN; this HTTP endpoint is unencrypted and must not be exposed publicly.

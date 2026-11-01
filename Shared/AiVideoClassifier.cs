@@ -45,7 +45,7 @@ public sealed class AiVideoClassifier
     {
         _model = model;
         _local = local;
-        _endpoint = "http://192.168.1.151:11434/v1/chat/completions";
+        _endpoint = "http://192.168.1.151:11400/v1/chat/completions";
     }
 
     public static Task<AiVideoClassifier> CreateLocalAsync(CancellationToken ct = default) =>
@@ -57,7 +57,7 @@ public sealed class AiVideoClassifier
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
-            using var response = await client.GetAsync("http://192.168.1.151:11434/v1/models", timeout.Token);
+            using var response = await client.GetAsync("http://192.168.1.151:11400/v1/models", timeout.Token);
             response.EnsureSuccessStatusCode();
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
             var model = document.RootElement.GetProperty("data").EnumerateArray()
@@ -70,7 +70,7 @@ public sealed class AiVideoClassifier
         catch (Exception ex) when (IsModelFailure(ex) && !ct.IsCancellationRequested)
         {
             throw new LocalModelUnavailableException(
-                $"The local model at 192.168.1.151:11434 is unavailable. {ex.Message}", ex);
+                $"The local model at 192.168.1.151:11400 is unavailable. {ex.Message}", ex);
         }
     }
 
@@ -322,8 +322,12 @@ public sealed class AiVideoClassifier
             ? JsonSerializer.Serialize(new { Model = _model, Endpoint = _endpoint, Version = 1, input.Title, input.Description })
             : JsonSerializer.Serialize(new
             {
-                Model = _model, Endpoint = _endpoint, Version = 2,
-                Query = semanticQuery, input.Title, input.Description
+                Model = _model,
+                Endpoint = _endpoint,
+                Version = 2,
+                Query = semanticQuery,
+                input.Title,
+                input.Description
             });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(metadata)));
     }
