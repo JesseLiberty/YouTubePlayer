@@ -96,9 +96,26 @@ internal static class Program
             var syncSchedule = (SyncSchedule)typeof(MainWindow)
                 .GetField("_syncSchedule", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
             syncSchedule.SetFrequency(SyncFrequency.OneHour, DateTime.Now.AddMinutes(-4));
+            var deadline = syncSchedule.NextSync;
+            var playback = new PlayerWindow("test", "Automatic sync deferral", 0) { Owner = window };
+            try
+            {
+                typeof(MainWindow).GetMethod("SyncTimer_Tick", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(window, [null, EventArgs.Empty]);
+                Require(syncSchedule.NextSync == deadline, "Playback consumed the pending automatic sync deadline.");
+                Require(window.Title.EndsWith("Time To Sync: 00:00:00"),
+                    "Deferred sync did not keep its overdue countdown at zero.");
+                Require(ReferenceEquals(typeof(MainWindow).GetField("_syncTask", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(window), pendingSync.Task), "Playback started an automatic sync.");
+            }
+            finally
+            {
+                playback.Close();
+            }
             typeof(MainWindow).GetMethod("SyncTimer_Tick", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(window, [null, EventArgs.Empty]);
             Require(syncSchedule.NextSync > DateTime.Now, "Automatic timer did not consume a due sync.");
+            Console.WriteLine("PASS: playback defers automatic sync without consuming its deadline; closing playback releases it.");
             Require(ReferenceEquals(typeof(MainWindow).GetField("_syncTask", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(window), pendingSync.Task), "A second sync overlapped the active sync.");
             pending.Add(olderSave.Task);

@@ -83,6 +83,8 @@ when settings are saved or the app starts; missed runs are not queued, and a syn
 already in progress is not overlapped. Sync remains available between automatic
 runs. During either kind of sync its button alternates red and green, then returns
 to its usual color. Closing Settings with the window's X discards changes.
+Automatic sync waits while a video player is open, preserving its pending deadline
+until playback closes so watch badges and resume positions stay current.
 
 ### Web (ASP.NET Core Blazor)
 
