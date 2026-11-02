@@ -7,6 +7,8 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using YouTubePlayer.Models;
 using YouTubePlayer.Services;
 using YouTube.Shared;
@@ -25,6 +27,7 @@ public partial class MainWindow : Window
     private const string KnownVideosFile = "known-videos.json";
     private const string VideoPositionsFile = "video-positions.json";
     private const string ImportantVideosFile = "important-videos.json";
+    private const string SettingsFile = "desktop-settings.json";
 
     private readonly YouTubeClient _client = new();
     private readonly ObservableCollection<SeriesColumn> _series = new();
@@ -57,16 +60,26 @@ public partial class MainWindow : Window
     private bool _searchesDrained;
     private readonly CancellationTokenSource _lifetime = new();
     private Task _syncTask = Task.CompletedTask;
+    private SyncSettings _settings = LocalStore.Load<SyncSettings>(SettingsFile) ?? new();
+    private readonly SyncSchedule _syncSchedule = new();
+    private readonly DispatcherTimer _syncTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private Brush? _idleSyncBackground;
+    private readonly string _baseWindowTitle;
 
     public MainWindow()
     {
         InitializeComponent();
+        _baseWindowTitle = Title;
         SeriesItems.ItemsSource = new CompositeCollection
         {
             _importantColumn,
             new CollectionContainer { Collection = _series },
         };
         StatusText.Text = "Click Sync to load your subscriptions.";
+        _syncSchedule.SetFrequency(_settings.Frequency, DateTime.Now);
+        UpdateSyncCountdown(DateTime.Now);
+        _syncTimer.Tick += SyncTimer_Tick;
+        _syncTimer.Start();
     }
 
     protected override async void OnClosing(CancelEventArgs e)
@@ -76,6 +89,7 @@ public partial class MainWindow : Window
         e.Cancel = true;
         if (_closing) return;
         _closing = true;
+        _syncTimer.Stop();
         IsEnabled = false;
         _lifetime.Cancel();
         CancelSemanticSearch();
@@ -109,6 +123,10 @@ public partial class MainWindow : Window
             "\u2022 If there are new cards in a column they will be marked with an asterisk\n" +
             "\u2022 Clicking unsubscribe eliminates that column and unsubscribes from the channel.\n" +
             "\u2022 Search video titles and summaries using keywords and semantic matching.\n" +
+            "\u2022 Click gear for settings\n" +
+            "\u2022 Use the gear to set automatic Sync frequency; 1 hour currently runs every 2 minutes for testing.\n" +
+            "\u2022 Time To Sync in the title bar counts down to the next automatic Sync.\n" +
+            "\u2022 Daily Sync runs at 5 AM while the app is open. Sync flashes red and green until finished.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n" +
               "\u2022 Clicking on the url puts it on the clipboard.\n" +
@@ -118,11 +136,71 @@ public partial class MainWindow : Window
         MessageBox.Show(this, instructions, "YouTube Player", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private async void SyncButton_Click(object sender, RoutedEventArgs e)
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_closing || !SyncButton.IsEnabled) return;
+        var dialog = new SettingsWindow(_settings.Frequency, frequency =>
+        {
+            var settings = new SyncSettings { Frequency = frequency };
+            LocalStore.Save(SettingsFile, settings);
+            _settings = settings;
+            _syncSchedule.SetFrequency(frequency, DateTime.Now);
+            UpdateSyncCountdown(DateTime.Now);
+        }) { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    private async void SyncButton_Click(object sender, RoutedEventArgs e) => await StartSyncAsync();
+
+    private async void SyncTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_closing) return;
+        var now = DateTime.Now;
+        var due = _syncSchedule.TryTakeDue(now);
+        UpdateSyncCountdown(now);
+        if (due)
+            await StartSyncAsync();
+    }
+
+    private void UpdateSyncCountdown(DateTime now)
+    {
+        if (_syncSchedule.NextSync is not { } next)
+        {
+            Title = _baseWindowTitle;
+            return;
+        }
+        var remaining = TimeSpan.FromSeconds(Math.Max(0, Math.Ceiling((next - now).TotalSeconds)));
+        Title = $"{_baseWindowTitle} - Time To Sync: {(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}";
+    }
+
+    private async Task StartSyncAsync()
+    {
+        if (_closing || !_syncTask.IsCompleted || !SyncButton.IsEnabled) return;
         _syncTask = SyncAsync();
         await _syncTask;
+    }
+
+    private void StartSyncIndicator()
+    {
+        _idleSyncBackground = SyncButton.Background;
+        var brush = new SolidColorBrush();
+        SyncButton.Background = brush;
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromSeconds(1),
+            RepeatBehavior = RepeatBehavior.Forever,
+            KeyFrames =
+            {
+                new DiscreteColorKeyFrame(Colors.Red, KeyTime.FromTimeSpan(TimeSpan.Zero)),
+                new DiscreteColorKeyFrame(Colors.Green, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(500)))
+            }
+        });
+    }
+
+    private void StopSyncIndicator()
+    {
+        if (SyncButton.Background is SolidColorBrush brush)
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        SyncButton.Background = _idleSyncBackground;
     }
 
     private async Task SyncAsync()
@@ -133,6 +211,7 @@ public partial class MainWindow : Window
         ApplySearchMatches();
         ClearUndo();
         SyncButton.IsEnabled = false;
+        StartSyncIndicator();
         var restartSearch = true;
         var classifying = false;
         try
@@ -228,6 +307,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            StopSyncIndicator();
             SyncButton.IsEnabled = true;
             if (restartSearch) StartSemanticSearch();
         }

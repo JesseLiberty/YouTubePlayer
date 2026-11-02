@@ -98,10 +98,22 @@
     <DockPanel Grid.Column="0">
         <Border DockPanel.Dock="Top" Background="#202020" Padding="8">
             <StackPanel Orientation="Horizontal">
+                <Button x:Name="SettingsButton" Content="&#x2699;" FontSize="18" Width="36" Padding="4"
+                        Background="#FFD54F" Foreground="Black" Margin="0,0,8,0"
+                        ToolTip="Settings" AutomationProperties.Name="Settings" Click="SettingsButton_Click" />
                 <Button x:Name="HelpButton" Content="Help" Width="100" Padding="4" Background="#FFD54F"
                         Foreground="Black" Margin="0,0,8,0" Click="HelpButton_Click" />
                 <Button x:Name="SyncButton" Content="Sync" Width="100" Padding="4" Background="#4CAF50"
-                        Foreground="Black" Click="SyncButton_Click" />
+                        Foreground="Black" Click="SyncButton_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
                 <Button x:Name="UndoButton" Content="Undo" Width="100" Padding="4" Margin="8,0,0,0"
                     Background="#FFD54F" Foreground="Black" Visibility="Collapsed" Click="UndoButton_Click" />
                 <TextBlock Text="Search:" Foreground="#DDDDDD" VerticalAlignment="Center" Margin="16,0,6,0" />

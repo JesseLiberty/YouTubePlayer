@@ -72,6 +72,18 @@ Use the window's maximize button to enlarge it when desired.
 Closing a player while its browser is still initializing is supported; initialization
 failures are shown as playback errors rather than terminating the application.
 
+The gear button to the left of Help opens **Settings**. Choose **Frequency**, then
+click **Save** to save it across desktop app restarts. **Never** (the default)
+syncs only when you click Sync. Automatic options are **1 hour**, **2 hours**,
+**6 hours**, and **Daily** (5 AM local time while the app is running).
+For testing, **1 hour** currently means **every 2 minutes**. When automatic sync is
+enabled, **Time To Sync** beside Jesse Liberty in the title bar counts down in
+hours, minutes, and seconds; **Never** hides the countdown. Hourly intervals start
+when settings are saved or the app starts; missed runs are not queued, and a sync
+already in progress is not overlapped. Sync remains available between automatic
+runs. During either kind of sync its button alternates red and green, then returns
+to its usual color. Closing Settings with the window's X discards changes.
+
 ### Web (ASP.NET Core Blazor)
 
 The web app provides single-click details, double-click playback, right-click importance toggling, removal with Undo, and drag and drop for columns and cards within a column.
