@@ -155,6 +155,11 @@ public partial class MainWindow : Window
     {
         if (_closing) return;
         var now = DateTime.Now;
+        if (OwnedWindows.OfType<PlayerWindow>().Any())
+        {
+            UpdateSyncCountdown(now);
+            return;
+        }
         var due = _syncSchedule.TryTakeDue(now);
         UpdateSyncCountdown(now);
         if (due)
