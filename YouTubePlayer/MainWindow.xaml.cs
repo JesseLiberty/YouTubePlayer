@@ -320,6 +320,12 @@ public partial class MainWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => StartSemanticSearch();
 
+    private void ClearSearch_Click(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Clear();
+        SearchBox.Focus();
+    }
+
     private void ApplyLoadedVideos(SeriesColumn column, IEnumerable<VideoItem> videos)
     {
         if (!_series.Contains(column)) return;
