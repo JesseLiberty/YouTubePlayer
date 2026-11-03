@@ -145,7 +145,8 @@ public partial class MainWindow : Window
             _settings = settings;
             _syncSchedule.SetFrequency(frequency, DateTime.Now);
             UpdateSyncCountdown(DateTime.Now);
-        }) { Owner = this };
+        })
+        { Owner = this };
         dialog.ShowDialog();
     }
 
