@@ -8,8 +8,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Loads up to 25 recent videos per subscribed channel on Sync
 * Displays your progress and total time for video, along with date and other meta-data
 * Search matches titles and summaries by keywords or semantic relevance
-* Single click on card displays details
-* Single click on url copies url to clipboard
+* Single click on card displays details and copies url to clipboard
 * If details contain chapters, clicking on a chapter brings you there
 * Double-click on video and go to where you left off
 * Mark videos as important (and see all important videos listed together)
