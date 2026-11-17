@@ -8,8 +8,7 @@ A player for syncing with and managing your YouTube subscriptions, available as 
 * Loads up to 25 recent videos per subscribed channel on Sync
 * Displays your progress and total time for video, along with date and other meta-data
 * Search matches titles and summaries by keywords or semantic relevance
-* Single click on card displays details
-* Single click on url copies url to clipboard
+* Single click on a card displays its details; in the desktop app, it also copies the URL to the clipboard
 * If details contain chapters, clicking on a chapter brings you there
 * Double-click on video and go to where you left off
 * Mark videos as important (and see all important videos listed together)
@@ -181,6 +180,7 @@ in the app; failed hide, importance, and reorder actions are not presented as sa
 A valid backup is restored automatically, with a trace warning. If neither copy is
 valid, loading reports an error instead of resetting saved state; damaged content
 is preserved in a `.corrupt-<hash>` file.
+
 * **YouTube account changes:** Unsubscribing changes the subscriptions of the Google/YouTube account currently signed in. The apps request YouTube permissions that allow subscription management.
 * **Local-only web sign-in:** The web app uses Desktop OAuth and opens a sign-in browser on the machine running the server. It is not a multi-user hosted service. Hosting it for independent users requires Web application OAuth and per-user authentication and storage.
 * **Embedded playback:** The web app uses the YouTube IFrame API. Videos whose owners disable embedding cannot play in its embedded player.
