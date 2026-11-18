@@ -115,7 +115,7 @@ public partial class MainWindow : Window
         var instructions =
              "\u00A9 Copyright 2026 Jesse Liberty\n\n" +
             "\u2022 Double click on a card (or the details page) to go to the video at last offset viewed\n" +
-            "\u2022 Single click to open details view\n" +
+            "\u2022 Single click on a card to open its details and copy its URL to the clipboard\n" +
             "\u2022 Drag a card to reorder videos within its column\n" +
             "\u2022 Drag a column header to reorder the columns (except first column)\n" +
             "\u2022 Right click on the card to toggle important ( ! ) and add to the important (first) column\n" +
@@ -129,7 +129,6 @@ public partial class MainWindow : Window
             "\u2022 Daily Sync runs at 5 AM while the app is open. Sync flashes red and green until finished.\n" +
             "\u2022 Clicking the X on a card hides it from that column.\n" +
             "\u2022 You can undo the last hide by clicking the undo button.\n" +
-              "\u2022 Clicking on the url puts it on the clipboard.\n" +
             "\u2022 An asterisk indicates a new entry.\n" +
             "\u2022 One check indicates partially read while two checks indicate finished.\n" +
             "\u2022 AI indicates a video having to do with artificial intelligence.\n";
@@ -615,6 +614,7 @@ public partial class MainWindow : Window
 
         ClearUndo();
         DetailsPane.DataContext = video;
+        CopyVideoUrl(video.VideoUrl);
     }
 
     private void VideoUrl_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
@@ -625,17 +625,21 @@ public partial class MainWindow : Window
 
     private void CardVideoUrl_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
     {
+        CopyVideoUrl(e.Uri.AbsoluteUri);
+        e.Handled = true;
+    }
+
+    private void CopyVideoUrl(string url)
+    {
         try
         {
-            Clipboard.SetText(e.Uri.AbsoluteUri);
+            Clipboard.SetText(url);
             StatusText.Text = "Copied video URL to clipboard.";
         }
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
             StatusText.Text = $"Could not copy video URL: {ex.Message}";
         }
-
-        e.Handled = true;
     }
 
     private void Video_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
