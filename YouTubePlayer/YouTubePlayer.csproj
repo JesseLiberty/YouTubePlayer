@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <BuildNumberFile>$(MSBuildProjectDirectory)\build-number.txt</BuildNumberFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,5 +25,21 @@
     <EmbeddedResource Include="client_secret.json" Condition="Exists('client_secret.json')" LogicalName="YouTubePlayer.client_secret.json" />
     <None Update="client_secret.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
+
+  <Target Name="IncrementBuildNumber" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_CurrentBuildNumber>$([System.IO.File]::ReadAllText('$(BuildNumberFile)').Trim())</_CurrentBuildNumber>
+      <_NextBuildNumber Condition="'$(DesignTimeBuild)' == 'true'">$(_CurrentBuildNumber)</_NextBuildNumber>
+      <_NextBuildNumber Condition="'$(DesignTimeBuild)' != 'true'">$([MSBuild]::Add($(_CurrentBuildNumber), 1))</_NextBuildNumber>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)BuildInfo.g.cs" Lines="namespace YouTubePlayer { internal static class BuildInfo { internal const int Number = $(_NextBuildNumber)%3B } }" Overwrite="true" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)BuildInfo.g.cs" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="SaveBuildNumber" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <WriteLinesToFile File="$(BuildNumberFile)" Lines="$(_NextBuildNumber)" Overwrite="true" />
+  </Target>
 
 </Project>
