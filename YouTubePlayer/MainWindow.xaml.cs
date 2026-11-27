@@ -69,7 +69,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _baseWindowTitle = Title;
+        _baseWindowTitle = $"{Title} | Build #: {BuildInfo.Number}";
         SeriesItems.ItemsSource = new CompositeCollection
         {
             _importantColumn,
